@@ -1,4 +1,4 @@
-/* Tokens. Telegram theme variables (stage 2) will override these. */
+/* Tokens. In Telegram, telegram.ts overrides them with the chat theme. */
 :root {
   --bg: #f1f3f7;
   --surface: #ffffff;
@@ -21,7 +21,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-scheme="light"]) {
     --bg: #12161f;
     --surface: #1b2130;
     --ink: #e9edf5;
@@ -37,6 +37,22 @@
     --ice: #4b8fbf;
     color-scheme: dark;
   }
+}
+:root[data-scheme="dark"] {
+  --bg: #12161f;
+  --surface: #1b2130;
+  --ink: #e9edf5;
+  --muted: #96a0b4;
+  --line: #2c3446;
+  --accent: #5aa0ff;
+  --accent-ink: #0b1220;
+  --t1: #252c3b;
+  --t2: #1f3326;
+  --t3: #1f2b44;
+  --t4: #33233b;
+  --t0: #33301f;
+  --ice: #4b8fbf;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -55,7 +71,12 @@ button { font: inherit; }
   max-width: 480px;
   margin: 0 auto;
   min-height: 100%;
-  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  /* In Telegram fullscreen the SDK exposes its own safe areas (system bars + Telegram's controls). */
+  padding:
+    max(12px, env(safe-area-inset-top), calc(var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)))
+    max(12px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px))
+    max(12px, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -103,6 +124,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
 .card.tier3 { background: var(--t3); }
 .card.tier4 { background: var(--t4); }
 .card .ico { font-size: 30px; line-height: 1; margin-top: -6px; }
+.card .prop { position: absolute; top: 4px; right: 4px; font-size: 16px; line-height: 1; }
 .card .lvl { font-size: 9px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
 .card .stats { position: absolute; bottom: -8px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 2px; }
 .card .stats span {
@@ -115,7 +137,7 @@ section { display: flex; flex-direction: column; gap: 6px; }
 .card.target { border-color: var(--good); border-style: dashed; }
 .card.frozen::after {
   content: "❄"; position: absolute; inset: 0; border-radius: 10px;
-  background: color-mix(in srgb, var(--ice) 45%, transparent); display: grid; place-items: start end; padding: 2px 6px; font-size: 14px;
+  background: color-mix(in srgb, var(--ice) 45%, transparent); display: grid; place-items: start start; padding: 2px 6px; font-size: 14px;
 }
 .card.dead { opacity: 0; transform: scale(.6); }
 .card:focus-visible, .slot:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
