@@ -8,7 +8,8 @@
 ## Структура
 
 - `packages/core` — правила игры: бой, лавка, бойцы. Один код для клиента и сервера.
-- `tools/balance.ts` — симуляция баланса ботами.
+- `packages/client` — прототип игры в браузере (Vite).
+- `tools/balance.ts` — симуляция баланса ботами, `tools/ghosts.ts` — набор отрядов-соперников для прототипа.
 
 ## Команды
 
@@ -19,4 +20,6 @@ npm install
 npm test          # автотесты ядра
 npm run typecheck # проверка типов
 npm run balance   # симуляция баланса, по умолчанию 3000 забегов
+npm run dev       # прототип на http://localhost:5173
+npm run build     # сборка прототипа в packages/client/dist
 ```

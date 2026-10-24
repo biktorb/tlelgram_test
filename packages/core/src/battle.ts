@@ -7,6 +7,7 @@ export type BattleResult = 'win' | 'loss' | 'draw';
 
 export interface BattleOutcome {
   result: BattleResult; // from the left side's point of view
+  start: { left: Unit[]; right: Unit[] }; // teams as the events refer to them
   events: EngineEvent[];
   left: Unit[]; // survivors
   right: Unit[];
@@ -23,6 +24,7 @@ function cloneTeam(team: readonly Unit[], offset: number): Unit[] {
 export function battle(leftTeam: readonly Unit[], rightTeam: readonly Unit[], seed: number): BattleOutcome {
   const left = cloneTeam(leftTeam, 0);
   const right = cloneTeam(rightTeam, 100);
+  const start = { left: structuredClone(left), right: structuredClone(right) };
   let uid = 1000;
   const eng = new Engine([left, right], new Rng(seed), () => ++uid);
 
@@ -55,5 +57,5 @@ export function battle(leftTeam: readonly Unit[], rightTeam: readonly Unit[], se
 
   const result: BattleResult =
     left.length > 0 && right.length === 0 ? 'win' : right.length > 0 && left.length === 0 ? 'loss' : 'draw';
-  return { result, events: eng.events, left, right };
+  return { result, start, events: eng.events, left, right };
 }

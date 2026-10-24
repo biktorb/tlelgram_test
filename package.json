@@ -5,7 +5,9 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "node --test packages/*/test/*.test.ts",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p packages/client",
+    "dev": "npm run dev -w @otryad/client",
+    "build": "npm run build -w @otryad/client",
     "balance": "node tools/balance.ts"
   },
   "engines": { "node": ">=22.18" },
