@@ -1,0 +1,16 @@
+{
+  "name": "otryad",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "node --test packages/*/test/*.test.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "balance": "node tools/balance.ts"
+  },
+  "engines": { "node": ">=22.18" },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/node": "22.10.2"
+  }
+}
