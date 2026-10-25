@@ -219,3 +219,5 @@ button:disabled { opacity: .45; cursor: default; }
 .answers { text-align: left; background: var(--surface); border-radius: 12px; padding: 10px 14px; }
 .answers ul { margin: 0; padding-left: 18px; font-size: 14px; }
 .answers li.new { font-weight: 700; }
+.board ol { margin: 0; padding: 0; list-style: none; font-size: 14px; }
+.board li.me { font-weight: 700; color: var(--accent); }

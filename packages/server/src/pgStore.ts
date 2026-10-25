@@ -8,8 +8,10 @@ import {
   type Duel,
   type DuelInboxItem,
   type DuelResult,
+  type ChatEntry,
   type Ghost,
   type GhostUnit,
+  type NewRunOptions,
   type Store,
   type StoredRun,
   type UserStats,
@@ -77,14 +79,15 @@ export class PgStore implements Store {
     return rows[0] ? toRun(rows[0]) : null;
   }
 
-  async createRun(userId: number, state: RunState, duelCode: string | null = null): Promise<StoredRun> {
+  async createRun(userId: number, state: RunState, opts: NewRunOptions = {}): Promise<StoredRun> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       await client.query('UPDATE runs SET finished = true, updated_at = now() WHERE user_id = $1 AND NOT finished', [userId]);
       const { rows } = await client.query(
-        `INSERT INTO runs (user_id, state, finished, wins, duel_code) VALUES ($1, $2, $3, $4, $5) RETURNING ${RUN_COLUMNS}`,
-        [userId, state, state.finished, state.wins, duelCode],
+        `INSERT INTO runs (user_id, state, finished, wins, duel_code, chat_instance)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${RUN_COLUMNS}`,
+        [userId, state, state.finished, state.wins, opts.duelCode ?? null, opts.chatInstance ?? null],
       );
       await client.query('COMMIT');
       return toRun(rows[0]);
@@ -172,6 +175,18 @@ export class PgStore implements Store {
     const unseen = rows.filter((r) => !r.seen).map((r) => r.id);
     if (unseen.length) await this.pool.query('UPDATE duel_results SET seen = true WHERE id = ANY($1::bigint[])', [unseen]);
     return rows.map((r) => ({ userName: r.user_name, wins: r.wins, result: r.result, isNew: !r.seen }));
+  }
+
+  async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
+    const { rows } = await this.pool.query<{ user_id: string; name: string; best: number; runs: string }>(
+      `SELECT r.user_id, u.first_name AS name, max(r.wins) AS best, count(*) AS runs
+       FROM runs r JOIN users u ON u.id = r.user_id
+       WHERE r.chat_instance = $1 AND r.updated_at >= $2
+       GROUP BY r.user_id, u.first_name
+       ORDER BY best DESC, runs DESC LIMIT $3`,
+      [chatInstance, since, limit],
+    );
+    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, bestWins: r.best, runs: Number(r.runs) }));
   }
 
   async stats(userId: number): Promise<UserStats> {

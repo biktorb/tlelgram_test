@@ -17,6 +17,13 @@ export interface DuelInfo {
   mine?: boolean; // the player's own duel
 }
 
+export interface ChatEntry {
+  name: string;
+  bestWins: number;
+  runs: number;
+  me: boolean;
+}
+
 export interface DuelAnswer {
   userName: string;
   wins: number;
@@ -43,6 +50,8 @@ export interface DuelBackend extends Backend {
   share(): Promise<{ duel: DuelInfo; link: string | null }>;
   duelInfo(code: string): Promise<DuelInfo>;
   duelAnswers(): Promise<DuelAnswer[]>;
+  // The week's leaderboard of the chat the game was opened from; null outside a chat.
+  chatTop(): Promise<ChatEntry[] | null>;
 }
 
 export class ApiError extends Error {
@@ -157,6 +166,10 @@ export class OnlineBackend implements DuelBackend {
 
   async duelAnswers(): Promise<DuelAnswer[]> {
     return (await this.call<{ results: DuelAnswer[] }>('GET', '/api/duels')).results;
+  }
+
+  async chatTop(): Promise<ChatEntry[] | null> {
+    return (await this.call<{ top: ChatEntry[] | null }>('GET', '/api/chat')).top;
   }
 
   record(_run: Run, action: Action): void {
