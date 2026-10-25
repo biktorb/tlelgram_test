@@ -52,8 +52,12 @@ if [ ! -f .env ]; then
   read -r -p "Домен игры [$DEFAULT_DOMAIN]: " DOMAIN </dev/tty || true
   DOMAIN="${DOMAIN:-$DEFAULT_DOMAIN}"
   TOKEN=""
-  while [ -z "$TOKEN" ]; do
+  # A token looks like 1234567890:AAH...; a failed paste into the hidden prompt
+  # used to save junk and break Telegram sign-in.
+  until [[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]]; do
+    [ -n "$TOKEN" ] && echo "Это не похоже на токен (нужно вида 1234567890:AAH...). Попробуйте ещё раз."
     read -r -s -p "Токен бота из @BotFather (ввод скрыт): " TOKEN </dev/tty || true
+    TOKEN="${TOKEN//[[:space:]]/}"
     echo
   done
   umask 077
