@@ -31,6 +31,19 @@ function initData(userId: number, name = 'Маша', authDate = Math.floor(Date.
 
 const auth = (userId: number) => ({ authorization: `tma ${initData(userId, `P${userId}`)}` });
 
+// Launch data as Telegram sends it when the game is opened from a group chat link.
+const chatAuth = (userId: number, chat: string) => ({
+  authorization: `tma ${signInitData(
+    {
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      chat_instance: chat,
+      chat_type: 'supergroup',
+      user: JSON.stringify({ id: userId, first_name: `P${userId}` }),
+    },
+    TOKEN,
+  )}`,
+});
+
 describe('initData validation', () => {
   test('accepts correctly signed data', () => {
     const r = verifyInitData(initData(7), TOKEN, 3600);
@@ -289,6 +302,26 @@ for (const [name, makeStore] of stores) {
       assert.deepEqual(inbox, [{ userName: 'P61', wins: bLast.run.state.wins, result: bLast.duel.battle.result, isNew: true }]);
       const seen = (await app.inject({ method: 'GET', url: '/api/duels', headers: auth(60) })).json().results;
       assert.equal(seen[0].isNew, false);
+    });
+
+    test('chat leaderboard counts runs started from that chat only', async () => {
+      const outside = await app.inject({ method: 'GET', url: '/api/chat', headers: auth(70) });
+      assert.deepEqual(outside.json(), { top: null });
+
+      for (const [id, chat] of [[70, 'c1'], [71, 'c1'], [72, 'c2']] as const) {
+        const r = (await app.inject({ method: 'POST', url: '/api/runs', headers: chatAuth(id, chat) })).json().run;
+        await playToEnd(id, r);
+      }
+      // A run started outside the chat does not count there.
+      await app.inject({ method: 'POST', url: '/api/runs', headers: auth(73) });
+
+      const top = (await app.inject({ method: 'GET', url: '/api/chat', headers: chatAuth(70, 'c1') })).json().top;
+      assert.deepEqual(top.map((e: { name: string }) => e.name).sort(), ['P70', 'P71']);
+      assert.ok(top.every((e: { bestWins: number; runs: number }) => e.runs === 1 && e.bestWins >= 0));
+      assert.ok(top.every((e: { bestWins: number }, i: number) => i === 0 || top[i - 1].bestWins >= e.bestWins), 'best first');
+      assert.equal(top.find((e: { name: string }) => e.name === 'P70').me, true);
+      assert.equal(top.find((e: { name: string }) => e.name === 'P71').me, false);
+      assert.equal(top[0].userId, undefined, 'player ids are not exposed');
     });
 
     test('ordinary runs have no duel battle', async () => {

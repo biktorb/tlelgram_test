@@ -72,7 +72,14 @@ export async function buildApp(
     const duel = req.body?.duel;
     if (duel !== undefined && duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     await store.upsertUser(u.id, u.first_name, u.username);
-    return { run: await game.start(u.id, duel ?? null) };
+    return { run: await game.start(u.id, duel ?? null, req.auth!.chatInstance ?? null) };
+  });
+
+  // Leaderboard of the chat the game was opened from; null outside a chat.
+  app.get('/api/chat', async (req) => {
+    const u = user(req);
+    const chat = req.auth!.chatInstance;
+    return { top: chat ? await game.chatTop(u.id, chat) : null };
   });
 
   // Shares a finished run as a duel and returns the link for friends.
@@ -114,8 +121,10 @@ function authenticate(req: FastifyRequest, config: Config): AuthResult | null {
   const value = rest.join(' ');
   if (scheme === 'tma' && config.botToken) return verifyInitData(value, config.botToken, config.initDataMaxAgeSec);
   if (scheme === 'dev' && config.devAuth) {
-    const id = Number(value);
-    return Number.isSafeInteger(id) && id > 0 ? { user: { id, first_name: `Dev ${id}` } } : null;
+    // "dev <id>" or "dev <id>@<chat>" to act as if opened from a group chat.
+    const [rawId, chat] = value.split('@');
+    const id = Number(rawId);
+    return Number.isSafeInteger(id) && id > 0 ? { user: { id, first_name: `Dev ${id}` }, chatInstance: chat || undefined } : null;
   }
   return null;
 }

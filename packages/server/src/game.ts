@@ -67,14 +67,21 @@ export class Game {
   }
 
   // A duel run starts from the challenger's seed, so the first shop is the same.
-  async start(userId: number, duelCode: string | null = null): Promise<RunView> {
+  async start(userId: number, duelCode: string | null = null, chatInstance: string | null = null): Promise<RunView> {
     if (duelCode === null) {
       const run = new Run(randomInt(0, 2 ** 31));
-      return view(await this.store.createRun(userId, run.snapshot()));
+      return view(await this.store.createRun(userId, run.snapshot(), { chatInstance }));
     }
     const duel = await this.duel(duelCode);
     if (duel.challengerId === userId) throw new GameError(422, 'Это ваш собственный вызов');
-    return view(await this.store.createRun(userId, new Run(duel.seed).snapshot(), duel.code));
+    return view(await this.store.createRun(userId, new Run(duel.seed).snapshot(), { duelCode: duel.code, chatInstance }));
+  }
+
+  // The week's best results of runs started from the chat the game was opened from.
+  async chatTop(userId: number, chatInstance: string) {
+    const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const top = await this.store.chatTop(chatInstance, since, 10);
+    return top.map(({ userId: id, name, bestWins, runs }) => ({ name, bestWins, runs, me: id === userId }));
   }
 
   // Shares a finished run as a duel; sharing the same run again returns the same code.

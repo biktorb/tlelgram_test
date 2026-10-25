@@ -46,6 +46,18 @@ export interface DuelInboxItem {
   isNew: boolean;
 }
 
+export interface NewRunOptions {
+  duelCode?: string | null; // the run answers this duel
+  chatInstance?: string | null; // the chat the game was opened from
+}
+
+export interface ChatEntry {
+  userId: number;
+  name: string;
+  bestWins: number;
+  runs: number;
+}
+
 export interface UserStats {
   runs: number;
   bestWins: number;
@@ -57,7 +69,7 @@ export interface Store {
   activeRun(userId: number): Promise<StoredRun | null>;
   getRun(runId: string): Promise<StoredRun | null>;
   // Finishes the player's active run, if any, and starts a new one.
-  createRun(userId: number, state: RunState, duelCode?: string | null): Promise<StoredRun>;
+  createRun(userId: number, state: RunState, opts?: NewRunOptions): Promise<StoredRun>;
   // Saves only if the stored version still equals run.version; returns the
   // new version, or null when another request got there first.
   saveRun(run: StoredRun, state: RunState): Promise<number | null>;
@@ -73,6 +85,8 @@ export interface Store {
   addDuelResult(result: DuelResult): Promise<void>;
   // The latest answers to the player's duels, newest first; marks them seen.
   takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]>;
+  // Players of runs started from this chat since the given time, best result first.
+  chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]>;
   stats(userId: number): Promise<UserStats>;
   close(): Promise<void>;
 }
@@ -89,7 +103,7 @@ export function closestGhost<T extends { wins: number }>(rows: T[], wins: number
 // In-memory store for tests and local development without a database.
 export class MemoryStore implements Store {
   private users = new Map<number, { firstName: string; username?: string }>();
-  private runs = new Map<string, StoredRun>();
+  private runs = new Map<string, StoredRun & { chatInstance: string | null; updatedAt: number }>();
   private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[] }[] = [];
   private duels = new Map<string, Duel>();
   private duelResults: (DuelResult & { seen: boolean })[] = [];
@@ -100,19 +114,19 @@ export class MemoryStore implements Store {
   }
 
   async activeRun(userId: number): Promise<StoredRun | null> {
-    for (const r of this.runs.values()) if (r.userId === userId && !r.finished) return structuredClone(r);
+    for (const r of this.runs.values()) if (r.userId === userId && !r.finished) return toStored(r);
     return null;
   }
 
   async getRun(runId: string): Promise<StoredRun | null> {
     const r = this.runs.get(runId);
-    return r ? structuredClone(r) : null;
+    return r ? toStored(r) : null;
   }
 
-  async createRun(userId: number, state: RunState, duelCode: string | null = null): Promise<StoredRun> {
+  async createRun(userId: number, state: RunState, opts: NewRunOptions = {}): Promise<StoredRun> {
     for (const r of this.runs.values()) if (r.userId === userId) r.finished = true;
-    const run: StoredRun = { id: `run-${++this.seq}`, userId, version: 1, state, finished: state.finished, duelCode };
-    this.runs.set(run.id, structuredClone(run));
+    const run: StoredRun = { id: `run-${++this.seq}`, userId, version: 1, state, finished: state.finished, duelCode: opts.duelCode ?? null };
+    this.runs.set(run.id, { ...structuredClone(run), chatInstance: opts.chatInstance ?? null, updatedAt: Date.now() });
     return run;
   }
 
@@ -120,6 +134,7 @@ export class MemoryStore implements Store {
     const cur = this.runs.get(run.id);
     if (!cur || cur.version !== run.version) return null;
     cur.version++;
+    cur.updatedAt = Date.now();
     cur.state = structuredClone(state);
     cur.finished = state.finished;
     return cur.version;
@@ -168,6 +183,18 @@ export class MemoryStore implements Store {
     return items;
   }
 
+  async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
+    const byUser = new Map<number, ChatEntry>();
+    for (const r of this.runs.values()) {
+      if (r.chatInstance !== chatInstance || r.updatedAt < since.getTime()) continue;
+      const e = byUser.get(r.userId) ?? { userId: r.userId, name: this.users.get(r.userId)?.firstName ?? 'Игрок', bestWins: 0, runs: 0 };
+      e.bestWins = Math.max(e.bestWins, r.state.wins);
+      e.runs++;
+      byUser.set(r.userId, e);
+    }
+    return [...byUser.values()].sort((a, b) => b.bestWins - a.bestWins || b.runs - a.runs).slice(0, limit);
+  }
+
   async stats(userId: number): Promise<UserStats> {
     const mine = [...this.runs.values()].filter((r) => r.userId === userId);
     return {
@@ -178,4 +205,8 @@ export class MemoryStore implements Store {
   }
 
   async close(): Promise<void> {}
+}
+
+function toStored({ id, userId, version, state, finished, duelCode }: StoredRun): StoredRun {
+  return structuredClone({ id, userId, version, state, finished, duelCode });
 }

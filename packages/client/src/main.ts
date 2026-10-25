@@ -1,9 +1,9 @@
 import './style.css';
 import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
-import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type DuelAnswer, type DuelInfo } from './backend.ts';
+import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type ChatEntry, type DuelAnswer, type DuelInfo } from './backend.ts';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
-import { haptic, initTelegram, playerName, setBack, shareLink, startParam } from './telegram.ts';
+import { canShareStory, haptic, initTelegram, playerName, setBack, shareLink, shareStory, startParam } from './telegram.ts';
 
 const app = document.getElementById('app')!;
 
@@ -19,6 +19,12 @@ let duelName: string | null = null;
 let duelOutcome: { result: 'win' | 'loss' | 'draw'; challengerName: string } | null = null;
 // Friends' answers to this player's duels.
 let answers: DuelAnswer[] = [];
+// Leaderboard of the chat the game was opened from; null outside a chat.
+let chatTop: ChatEntry[] | null = null;
+
+async function loadChatTop(): Promise<void> {
+  if (hasDuels(backend)) chatTop = await backend.chatTop().catch(() => null);
+}
 
 async function startNewRun(duel?: DuelInfo): Promise<void> {
   if (busy) return;
@@ -63,6 +69,7 @@ async function fight(): Promise<void> {
   try {
     const res = await backend.fight(run);
     run = res.run;
+    if (run.s.finished) await loadChatTop();
     const duel = res.duel;
     // A duel run ends with one more battle: the final team against the challenger's.
     const next = duel
@@ -250,14 +257,17 @@ function renderOver(): void {
       h('div', { class: 'row team' }, ...s.team.map((u) => card(u))),
       duelLine,
       hasDuels(backend) ? h('button', { class: 'primary', type: 'button', onclick: () => void shareRun() }, '⚔️ Побей мой отряд') : null,
+      hasDuels(backend) && canShareStory() ? h('button', { class: 'ghost', type: 'button', onclick: () => void shareRun('story') }, '📸 В историю') : null,
       h('button', { class: hasDuels(backend) ? 'ghost' : 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
+      chatBoard(),
       answersList(),
     ),
   );
 }
 
 // Sends friends a link: they play from the same seed and fight this team at the end.
-async function shareRun(): Promise<void> {
+// To a chat by default, or as a story with the link in the caption.
+async function shareRun(to: 'chat' | 'story' = 'chat'): Promise<void> {
   if (busy || !hasDuels(backend)) return;
   busy = true;
   try {
@@ -268,12 +278,20 @@ async function shareRun(): Promise<void> {
     }
     const wins = run.s.wins;
     const boast = wins > 0 ? `Я набрал ${wins} ${plural(wins, 'победу', 'победы', 'побед')} в «Отряде»` : 'Я собрал отряд в «Отряде»';
-    shareLink(link, `${boast} 🐱⚔️ Сможешь победить моих котов?`);
+    if (to === 'story') shareStory(new URL('story.jpg', location.href).href, `${boast} 🐱⚔️ Побей мой отряд: ${link}`);
+    else shareLink(link, `${boast} 🐱⚔️ Сможешь победить моих котов?`);
   } catch (e) {
     showError(e);
   } finally {
     busy = false;
   }
+}
+
+function chatBoard(): HTMLElement | null {
+  if (!chatTop || chatTop.length === 0) return null;
+  const line = (e: ChatEntry, i: number) =>
+    h('li', { class: e.me ? 'me' : '' }, `${i + 1}. ${e.name} — ${e.bestWins} ${plural(e.bestWins, 'победа', 'победы', 'побед')}`);
+  return h('section', { class: 'answers board' }, h('div', { class: 'label' }, h('span', {}, 'Рейтинг чата за неделю')), h('ol', {}, ...chatTop.map(line)));
 }
 
 function answersList(): HTMLElement | null {
@@ -328,6 +346,7 @@ async function loadDuels(): Promise<DuelInfo | null> {
     (async () => {
       if (b.duel) duelName = (await b.duelInfo(b.duel).catch(() => null))?.challengerName ?? 'другом';
     })(),
+    loadChatTop(),
     (async () => {
       answers = await b.duelAnswers().catch(() => []);
       const fresh = answers.filter((a) => a.isNew);

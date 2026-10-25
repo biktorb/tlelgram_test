@@ -28,6 +28,7 @@ interface WebApp {
   setBackgroundColor?(color: string): void;
   onEvent(name: string, cb: () => void): void;
   openTelegramLink?(url: string): void;
+  shareToStory?(mediaUrl: string, params?: { text?: string }): void;
   BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
   HapticFeedback?: {
     impactOccurred(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'): void;
@@ -101,6 +102,15 @@ export function shareLink(url: string, text: string): void {
   const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
   if (inTelegram && tg!.openTelegramLink) tg!.openTelegramLink(share);
   else window.open(share, '_blank', 'noopener');
+}
+
+export function canShareStory(): boolean {
+  return inTelegram && !!tg!.shareToStory && tg!.isVersionAtLeast('7.8');
+}
+
+// Opens Telegram's story editor with a picture (a public https URL) and a caption.
+export function shareStory(mediaUrl: string, text: string): void {
+  if (canShareStory()) tg!.shareToStory!(mediaUrl, { text });
 }
 
 export function playerName(): string {
