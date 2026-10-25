@@ -1,6 +1,6 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { ActionError, Rng, Run, type Action, type RunState } from '@otryad/core';
+import { ActionError, Rng, Run, SEASON_PASS, type Action, type RunState } from '@otryad/core';
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
 import { loadConfig, type Config } from '../src/config.ts';
@@ -454,7 +454,8 @@ for (const [name, makeStore] of stores) {
       const p = await profile(120);
       assert.deepEqual(p.tasks[0], { id: 'runs', title: 'Сыграйте 2 забега', goal: 2, reward: 20, progress: 2, done: true });
       assert.equal(p.tasks[1].progress, Math.min(wins, 6));
-      const paid = 20 + (wins >= 6 ? 30 : 0);
+      const passFish = (level: number) => SEASON_PASS.slice(0, level).reduce((n, r) => n + ('fish' in r ? r.fish : 0), 0);
+      const paid = 20 + (wins >= 6 ? 30 : 0) + passFish(p.season.level);
       assert.equal(p.fish, paid);
       assert.equal((await profile(120)).fish, paid, 'a task pays once');
 
@@ -463,13 +464,34 @@ for (const [name, makeStore] of stores) {
       assert.equal(bought.statusCode, 200, bought.body);
       assert.deepEqual([bought.json().profile.fish, bought.json().profile.frame, bought.json().profile.owned], [paid + 100, 'gold', ['gold']]);
       assert.equal((await shop(120, 'buy', 'gold')).json().profile.fish, paid + 100, 'buying twice is free');
-      assert.equal((await shop(120, 'buy', 'crown')).statusCode, 404);
+      assert.equal((await shop(120, 'buy', 'hat')).statusCode, 404);
       assert.equal((await shop(120, 'equip', 'neon')).statusCode, 422, 'only owned frames');
       assert.equal((await shop(120, 'equip', null)).json().profile.frame, null);
       assert.equal((await shop(120, 'equip', 'gold')).json().profile.frame, 'gold');
 
+      assert.equal((await shop(120, 'buy', 'crown')).statusCode, 422, 'season frames are not sold');
+      assert.equal(p.season.points, wins);
+      assert.equal(p.season.level, Math.floor(wins / p.season.perLevel));
+      assert.deepEqual(p.season.rewards.at(-1), { frame: 'crown' });
+
       await store.addGhost(77, 0, 120, 'P120', [{ id: 'recruit', atk: 2, hp: 2, xp: 0 }], 'gold');
       assert.equal((await store.pickGhost(77, 0, 1, Math.random))?.frame, 'gold');
+    });
+
+    test('season pass: every level pays once, the last one a frame', async () => {
+      const profile = async (id: number) => (await app.inject({ method: 'GET', url: '/api/profile', headers: auth(id) })).json().profile;
+      assert.equal((await profile(130)).season.level, 0);
+      // A finished run with enough wins for the whole pass, stored directly.
+      await store.createRun(130, { ...new Run(1).snapshot(), finished: true, wins: 10 * 15 });
+      const p = await profile(130);
+      assert.equal(p.season.points, 150);
+      assert.equal(p.season.level, 10);
+      assert.ok(p.owned.includes('crown'));
+      const fishFromPass = 20 + 30 + 40 + 50 + 60 + 70 + 80 + 90 + 100;
+      assert.ok(p.fish >= fishFromPass, `${p.fish} fish`);
+      assert.equal((await profile(130)).fish, p.fish, 'levels pay once');
+      const equip = await app.inject({ method: 'POST', url: '/api/shop/equip', headers: auth(130), payload: { item: 'crown' } });
+      assert.equal(equip.json().profile.frame, 'crown');
     });
 
     test('ordinary runs have no duel battle', async () => {

@@ -30,6 +30,7 @@ export interface Profile {
   frame: string | null;
   owned: string[];
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
+  season: { id: string; endsAt: string; points: number; perLevel: number; level: number; rewards: ({ fish: number } | { frame: string })[] };
 }
 
 export interface LeagueInfo {

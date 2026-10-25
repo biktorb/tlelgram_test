@@ -314,14 +314,17 @@ export class PgStore implements Store {
     return rows.map((r) => r.task);
   }
 
-  async claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean> {
+  async claimTask(userId: number, day: string, task: string, reward: number, item?: string): Promise<boolean> {
     const { rowCount } = await this.pool.query(
       `WITH claim AS (
          INSERT INTO task_claims (user_id, day, task, reward) VALUES ($1, $2, $3, $4)
          ON CONFLICT DO NOTHING RETURNING reward
+       ), granted AS (
+         INSERT INTO user_items (user_id, item) SELECT $1, $5::text FROM claim WHERE $5::text IS NOT NULL
+         ON CONFLICT DO NOTHING
        )
        UPDATE users SET fish = fish + claim.reward FROM claim WHERE users.id = $1`,
-      [userId, day, task, reward],
+      [userId, day, task, reward, item ?? null],
     );
     return rowCount === 1;
   }
