@@ -6,6 +6,7 @@ export interface BattleNames {
   player: string;
   enemy: string;
   title: string;
+  frames?: [string | null, string | null]; // card frames of the player and the enemy
 }
 
 const BASE_MS = {
@@ -26,8 +27,9 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
   const units = new Map<number, { unit: Unit; el: HTMLElement; side: number }>();
   const rows = [h('div', { class: 'row player' }), h('div', { class: 'row enemy' })];
 
+  const frameClass = (side: number) => (names.frames?.[side] ? `frame-${names.frames[side]}` : '');
   const add = (side: number, u: Unit, pos?: number) => {
-    const el = card(u);
+    const el = card(u, frameClass(side));
     units.set(u.uid, { unit: { ...u }, el, side });
     const row = rows[side];
     const at = pos === undefined ? null : row.children[pos] ?? null;
@@ -66,7 +68,7 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
     if (skipped) {
       for (const side of [0, 1]) {
         const survivors = side === 0 ? out.left : out.right;
-        rows[side].replaceChildren(...survivors.map((u) => card(u)));
+        rows[side].replaceChildren(...survivors.map((u) => card(u, frameClass(side))));
       }
     }
     setBack(onDone);

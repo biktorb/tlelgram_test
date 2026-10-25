@@ -5,6 +5,7 @@ import { initData } from './telegram.ts';
 export interface TurnOutcome {
   out: BattleOutcome;
   enemy: string;
+  enemyFrame?: string | null; // the frame the opponent wore
   // Last turn of a duel run: the final team against the challenger's.
   duel?: { out: BattleOutcome; challengerName: string };
 }
@@ -22,6 +23,13 @@ export interface DailyInfo {
   status: 'none' | 'active' | 'finished';
   top: { name: string; wins: number; lives: number; me: boolean }[];
   rank: number | null;
+}
+
+export interface Profile {
+  fish: number;
+  frame: string | null;
+  owned: string[];
+  tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
 }
 
 export interface LeagueInfo {
@@ -78,6 +86,8 @@ export interface DuelBackend extends Backend {
   chatTop(): Promise<ChatEntry[] | null>;
   dailyInfo(): Promise<DailyInfo>;
   league(): Promise<LeagueInfo>;
+  profile(): Promise<Profile>;
+  shop(what: 'buy' | 'equip', item: string | null): Promise<Profile>;
 }
 
 export class ApiError extends Error {
@@ -185,6 +195,14 @@ export class OnlineBackend implements DuelBackend {
     return this.adopt(run);
   }
 
+  async profile(): Promise<Profile> {
+    return (await this.call<{ profile: Profile }>('GET', '/api/profile')).profile;
+  }
+
+  async shop(what: 'buy' | 'equip', item: string | null): Promise<Profile> {
+    return (await this.call<{ profile: Profile }>('POST', `/api/shop/${what}`, { item })).profile;
+  }
+
   async league(): Promise<LeagueInfo> {
     return (await this.call<{ league: LeagueInfo }>('GET', '/api/league')).league;
   }
@@ -217,12 +235,13 @@ export class OnlineBackend implements DuelBackend {
     const res = await this.call<{
       run: RunView;
       battle: BattleOutcome;
-      enemy: { name: string };
+      enemy: { name: string; frame: string | null };
       duel?: { battle: BattleOutcome; challengerName: string };
     }>('POST', `/api/runs/${this.runId}/turn`, { version: this.version, actions: this.actions });
     return {
       out: res.battle,
       enemy: res.enemy.name,
+      enemyFrame: res.enemy.frame,
       duel: res.duel && { out: res.duel.battle, challengerName: res.duel.challengerName },
       run: this.adopt(res.run),
     };
