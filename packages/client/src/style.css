@@ -221,3 +221,6 @@ button:disabled { opacity: .45; cursor: default; }
 .answers li.new { font-weight: 700; }
 .board ol { margin: 0; padding: 0; list-style: none; font-size: 14px; }
 .board li.me { font-weight: 700; color: var(--accent); }
+.daily-banner { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: 12px; padding: 8px 8px 8px 12px; font-size: 13px; }
+.daily-banner span { flex: 1; }
+.daily-banner button { padding: 8px 14px; border: 1px solid var(--line); }

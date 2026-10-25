@@ -1,6 +1,6 @@
 import './style.css';
 import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
-import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type ChatEntry, type DuelAnswer, type DuelInfo } from './backend.ts';
+import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type ChatEntry, type DailyInfo, type DuelAnswer, type DuelInfo } from './backend.ts';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
 import { canShareStory, haptic, initTelegram, playerName, setBack, shareLink, shareStory, startParam } from './telegram.ts';
@@ -22,6 +22,30 @@ let answers: DuelAnswer[] = [];
 // Leaderboard of the chat the game was opened from; null outside a chat.
 let chatTop: ChatEntry[] | null = null;
 
+// Today's challenge and its leaderboard; null offline.
+let daily: DailyInfo | null = null;
+
+async function loadDaily(): Promise<void> {
+  if (hasDuels(backend)) daily = await backend.dailyInfo().catch(() => null);
+}
+
+async function startDaily(): Promise<void> {
+  if (busy) return;
+  busy = true;
+  try {
+    run = await backend.newRun({ daily: true });
+    duelName = null;
+    duelOutcome = null;
+    selection = null;
+    await loadDaily();
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy = false;
+  }
+  render();
+}
+
 async function loadChatTop(): Promise<void> {
   if (hasDuels(backend)) chatTop = await backend.chatTop().catch(() => null);
 }
@@ -30,7 +54,7 @@ async function startNewRun(duel?: DuelInfo): Promise<void> {
   if (busy) return;
   busy = true;
   try {
-    run = await backend.newRun(duel?.code);
+    run = await backend.newRun(duel ? { duel: duel.code } : {});
     duelName = duel ? duel.challengerName : null;
     duelOutcome = null;
     selection = null;
@@ -69,7 +93,7 @@ async function fight(): Promise<void> {
   try {
     const res = await backend.fight(run);
     run = res.run;
-    if (run.s.finished) await loadChatTop();
+    if (run.s.finished) await Promise.all([loadChatTop(), loadDaily()]);
     const duel = res.duel;
     // A duel run ends with one more battle: the final team against the challenger's.
     const next = duel
@@ -213,6 +237,8 @@ function renderShop(): void {
       { class: 'screen shop' },
       hud(),
       duelName ? h('div', { class: 'duel-note' }, `⚔️ Дуэль с ${duelName}: в конце забега ваш отряд сразится с отрядом соперника`) : null,
+      backend.daily ? h('div', { class: 'duel-note' }, `🗓 Вызов дня: у всех сегодня одна стартовая лавка, попытка одна`) : null,
+      dailyBanner(),
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Отряд'), h('span', { class: 'muted' }, 'фронт ← → тыл')), h('div', { class: 'row team' }, ...slots)),
       infoPanel(),
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Лавка'), h('span', { class: 'muted' }, `боец ${RULES.buyCost}🪙`)), h('div', { class: 'row shoprow' }, ...(shopCards.length ? shopCards : [h('div', { class: 'empty muted' }, 'Лавка пуста. Обновите её или идите в бой.')]))),
@@ -257,8 +283,10 @@ function renderOver(): void {
       h('div', { class: 'row team' }, ...s.team.map((u) => card(u))),
       duelLine,
       hasDuels(backend) ? h('button', { class: 'primary', type: 'button', onclick: () => void shareRun() }, '⚔️ Побей мой отряд') : null,
+      daily?.status === 'none' ? h('button', { class: 'ghost', type: 'button', onclick: () => void startDaily() }, '🗓 Вызов дня') : null,
       hasDuels(backend) && canShareStory() ? h('button', { class: 'ghost', type: 'button', onclick: () => void shareRun('story') }, '📸 В историю') : null,
       h('button', { class: hasDuels(backend) ? 'ghost' : 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
+      dailyBoard(),
       chatBoard(),
       answersList(),
     ),
@@ -285,6 +313,26 @@ async function shareRun(to: 'chat' | 'story' = 'chat'): Promise<void> {
   } finally {
     busy = false;
   }
+}
+
+// Offered in the shop until today's challenge is played; tapping it ends the current run.
+function dailyBanner(): HTMLElement | null {
+  if (daily?.status !== 'none' || backend.daily || duelName) return null;
+  const note = run.s.round > 1 ? ' Текущий забег будет завершён.' : '';
+  return h(
+    'div',
+    { class: 'daily-banner' },
+    h('span', {}, `🗓 Вызов дня: одна попытка, общая лавка для всех.${note}`),
+    h('button', { class: 'ghost', type: 'button', onclick: () => void startDaily() }, 'Играть'),
+  );
+}
+
+function dailyBoard(): HTMLElement | null {
+  if (!daily || daily.top.length === 0 || !backend.daily) return null;
+  const line = (e: DailyInfo['top'][number], i: number) =>
+    h('li', { class: e.me ? 'me' : '' }, `${i + 1}. ${e.name} — ${e.wins} ${plural(e.wins, 'победа', 'победы', 'побед')}, ❤️ ${e.lives}`);
+  const mine = daily.rank && daily.rank > daily.top.length ? h('p', { class: 'muted small' }, `Ваше место: ${daily.rank}`) : null;
+  return h('section', { class: 'answers board' }, h('div', { class: 'label' }, h('span', {}, 'Вызов дня: рейтинг')), h('ol', {}, ...daily.top.map(line)), mine);
 }
 
 function chatBoard(): HTMLElement | null {
@@ -347,6 +395,7 @@ async function loadDuels(): Promise<DuelInfo | null> {
       if (b.duel) duelName = (await b.duelInfo(b.duel).catch(() => null))?.challengerName ?? 'другом';
     })(),
     loadChatTop(),
+    loadDaily(),
     (async () => {
       answers = await b.duelAnswers().catch(() => []);
       const fresh = answers.filter((a) => a.isNew);

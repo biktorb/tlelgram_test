@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
-import { ActionError, battle, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
-import type { Duel, DuelInboxItem, GhostUnit, Store, StoredRun } from './store.ts';
+import { ActionError, battle, hashSeed, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
+import { DailyTakenError, type Duel, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
 
 export const MAX_ACTIONS_PER_TURN = 200;
 
@@ -17,7 +17,20 @@ export interface RunView {
   version: number;
   state: RunState;
   duel: string | null; // code of the duel this run answers
+  daily: string | null; // date of the daily challenge this run plays
 }
+
+export interface DailyInfo {
+  date: string;
+  status: 'none' | 'active' | 'finished'; // the player's attempt today
+  top: { name: string; wins: number; lives: number; me: boolean }[];
+  rank: number | null; // the player's place once their attempt is finished
+}
+
+// Days change at midnight Moscow time, when most players are.
+const DAY_OFFSET_MS = 3 * 3600 * 1000;
+export const dayOf = (now: number) => new Date(now + DAY_OFFSET_MS).toISOString().slice(0, 10);
+export const dailySeed = (date: string) => hashSeed(`daily:${date}`);
 
 type BattleView = Pick<BattleOutcome, 'result' | 'start' | 'events' | 'left' | 'right'>;
 
@@ -42,7 +55,7 @@ export interface Notifier {
   duelAnswered(duel: Duel, friendName: string, friendResult: BattleResult): void;
 }
 
-const view = (r: StoredRun): RunView => ({ id: r.id, version: r.version, state: r.state, duel: r.duelCode });
+const view = (r: StoredRun): RunView => ({ id: r.id, version: r.version, state: r.state, duel: r.duelCode, daily: r.daily });
 const battleView = (o: BattleOutcome): BattleView => ({ result: o.result, start: o.start, events: o.events, left: o.left, right: o.right });
 const withUids = (team: GhostUnit[]) => team.map((u, i) => ({ ...u, uid: i + 1 }));
 
@@ -55,10 +68,41 @@ const random = () => randomInt(0, 2 ** 31) / 2 ** 31;
 export class Game {
   private store: Store;
   private notifier: Notifier | null;
+  private now: () => number;
 
-  constructor(store: Store, notifier: Notifier | null = null) {
+  constructor(store: Store, notifier: Notifier | null = null, now: () => number = Date.now) {
     this.store = store;
     this.notifier = notifier;
+    this.now = now;
+  }
+
+  // Today's challenge: everyone starts from the same seed, one attempt each.
+  async startDaily(userId: number, chatInstance: string | null = null): Promise<RunView> {
+    const date = dayOf(this.now());
+    const existing = await this.store.dailyRun(userId, date);
+    if (existing && !existing.finished) return view(existing);
+    if (existing) throw new GameError(409, 'Вызов дня уже сыгран, новый будет завтра');
+    try {
+      return view(await this.store.createRun(userId, new Run(dailySeed(date)).snapshot(), { daily: date, chatInstance }));
+    } catch (e) {
+      if (e instanceof DailyTakenError) throw new GameError(409, 'Вызов дня уже начат в другом окне');
+      throw e;
+    }
+  }
+
+  async daily(userId: number): Promise<DailyInfo> {
+    const date = dayOf(this.now());
+    const [mine, top, rank] = await Promise.all([
+      this.store.dailyRun(userId, date),
+      this.store.dailyTop(date, 10),
+      this.store.dailyRank(userId, date),
+    ]);
+    return {
+      date,
+      status: !mine ? 'none' : mine.finished ? 'finished' : 'active',
+      top: top.map(({ userId: id, name, wins, lives }) => ({ name, wins, lives, me: id === userId })),
+      rank,
+    };
   }
 
   async current(userId: number): Promise<RunView | null> {
@@ -144,7 +188,7 @@ export class Game {
     await this.store.addGhost(round, winsBefore, userId, playerName, team.map(stripUid));
 
     const result: TurnResult = {
-      run: { id: stored.id, version: newVersion, state: run.snapshot(), duel: stored.duelCode },
+      run: { id: stored.id, version: newVersion, state: run.snapshot(), duel: stored.duelCode, daily: stored.daily },
       battle: battleView(out),
       enemy: { name: ghost?.name ?? 'Пустая арена' },
     };

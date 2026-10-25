@@ -17,6 +17,13 @@ export interface DuelInfo {
   mine?: boolean; // the player's own duel
 }
 
+export interface DailyInfo {
+  date: string;
+  status: 'none' | 'active' | 'finished';
+  top: { name: string; wins: number; lives: number; me: boolean }[];
+  rank: number | null;
+}
+
 export interface ChatEntry {
   name: string;
   bestWins: number;
@@ -36,8 +43,10 @@ export interface Backend {
   readonly online: boolean;
   // Code of the duel the current run answers, if any.
   readonly duel: string | null;
+  // Date of the daily challenge the current run plays, if any.
+  readonly daily: string | null;
   load(): Promise<Run>;
-  newRun(duel?: string): Promise<Run>;
+  newRun(opts?: { duel?: string; daily?: boolean }): Promise<Run>;
   // Called after an action was applied to the local run.
   record(run: Run, action: Action): void;
   // Ends the shop phase and fights. Returns the run as it is after the battle.
@@ -52,6 +61,7 @@ export interface DuelBackend extends Backend {
   duelAnswers(): Promise<DuelAnswer[]>;
   // The week's leaderboard of the chat the game was opened from; null outside a chat.
   chatTop(): Promise<ChatEntry[] | null>;
+  dailyInfo(): Promise<DailyInfo>;
 }
 
 export class ApiError extends Error {
@@ -73,6 +83,7 @@ const STORE_KEY = 'otryad.run.v1';
 export class OfflineBackend implements Backend {
   readonly online = false;
   readonly duel = null;
+  readonly daily = null;
 
   async load(): Promise<Run> {
     try {
@@ -130,11 +141,13 @@ interface RunView {
   version: number;
   state: RunState;
   duel: string | null;
+  daily: string | null;
 }
 
 export class OnlineBackend implements DuelBackend {
   readonly online = true;
   duel: string | null = null;
+  daily: string | null = null;
   private base: string;
   private auth: string;
   private runId = '';
@@ -151,9 +164,13 @@ export class OnlineBackend implements DuelBackend {
     return run ? this.adopt(run) : this.newRun();
   }
 
-  async newRun(duel?: string): Promise<Run> {
-    const { run } = await this.call<{ run: RunView }>('POST', '/api/runs', duel ? { duel } : {});
+  async newRun(opts: { duel?: string; daily?: boolean } = {}): Promise<Run> {
+    const { run } = await this.call<{ run: RunView }>('POST', '/api/runs', opts);
     return this.adopt(run);
+  }
+
+  async dailyInfo(): Promise<DailyInfo> {
+    return (await this.call<{ daily: DailyInfo }>('GET', '/api/daily')).daily;
   }
 
   share(): Promise<{ duel: DuelInfo; link: string | null }> {
@@ -195,6 +212,7 @@ export class OnlineBackend implements DuelBackend {
     this.runId = view.id;
     this.version = view.version;
     this.duel = view.duel ?? null;
+    this.daily = view.daily ?? null;
     this.actions = [];
     return new Run(view.state.seed, view.state);
   }

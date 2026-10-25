@@ -9,6 +9,7 @@ export interface StoredRun {
   state: RunState;
   finished: boolean;
   duelCode: string | null; // set when the run answers a duel
+  daily: string | null; // YYYY-MM-DD of the daily challenge this run plays
 }
 
 export interface Ghost {
@@ -49,7 +50,18 @@ export interface DuelInboxItem {
 export interface NewRunOptions {
   duelCode?: string | null; // the run answers this duel
   chatInstance?: string | null; // the chat the game was opened from
+  daily?: string | null; // YYYY-MM-DD of the daily challenge
 }
+
+export interface DailyEntry {
+  userId: number;
+  name: string;
+  wins: number;
+  lives: number;
+}
+
+// Thrown by createRun when the player already has a run for that daily challenge.
+export class DailyTakenError extends Error {}
 
 export interface ChatEntry {
   userId: number;
@@ -85,6 +97,11 @@ export interface Store {
   addDuelResult(result: DuelResult): Promise<void>;
   // The latest answers to the player's duels, newest first; marks them seen.
   takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]>;
+  dailyRun(userId: number, date: string): Promise<StoredRun | null>;
+  // Finished runs of the day's challenge: most wins, then most lives left, then who finished first.
+  dailyTop(date: string, limit: number): Promise<DailyEntry[]>;
+  // The player's place in that order, or null when their daily run is not finished.
+  dailyRank(userId: number, date: string): Promise<number | null>;
   // Players of runs started from this chat since the given time, best result first.
   chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]>;
   stats(userId: number): Promise<UserStats>;
@@ -124,8 +141,10 @@ export class MemoryStore implements Store {
   }
 
   async createRun(userId: number, state: RunState, opts: NewRunOptions = {}): Promise<StoredRun> {
+    const daily = opts.daily ?? null;
+    if (daily && [...this.runs.values()].some((r) => r.userId === userId && r.daily === daily)) throw new DailyTakenError();
     for (const r of this.runs.values()) if (r.userId === userId) r.finished = true;
-    const run: StoredRun = { id: `run-${++this.seq}`, userId, version: 1, state, finished: state.finished, duelCode: opts.duelCode ?? null };
+    const run: StoredRun = { id: `run-${++this.seq}`, userId, version: 1, state, finished: state.finished, duelCode: opts.duelCode ?? null, daily };
     this.runs.set(run.id, { ...structuredClone(run), chatInstance: opts.chatInstance ?? null, updatedAt: Date.now() });
     return run;
   }
@@ -183,6 +202,28 @@ export class MemoryStore implements Store {
     return items;
   }
 
+  async dailyRun(userId: number, date: string): Promise<StoredRun | null> {
+    for (const r of this.runs.values()) if (r.userId === userId && r.daily === date) return toStored(r);
+    return null;
+  }
+
+  private dailyOrder(date: string) {
+    return [...this.runs.values()]
+      .filter((r) => r.daily === date && r.finished)
+      .sort((a, b) => b.state.wins - a.state.wins || b.state.lives - a.state.lives || a.updatedAt - b.updatedAt);
+  }
+
+  async dailyTop(date: string, limit: number): Promise<DailyEntry[]> {
+    return this.dailyOrder(date)
+      .slice(0, limit)
+      .map((r) => ({ userId: r.userId, name: this.users.get(r.userId)?.firstName ?? 'Игрок', wins: r.state.wins, lives: r.state.lives }));
+  }
+
+  async dailyRank(userId: number, date: string): Promise<number | null> {
+    const i = this.dailyOrder(date).findIndex((r) => r.userId === userId);
+    return i < 0 ? null : i + 1;
+  }
+
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
     const byUser = new Map<number, ChatEntry>();
     for (const r of this.runs.values()) {
@@ -207,6 +248,6 @@ export class MemoryStore implements Store {
   async close(): Promise<void> {}
 }
 
-function toStored({ id, userId, version, state, finished, duelCode }: StoredRun): StoredRun {
-  return structuredClone({ id, userId, version, state, finished, duelCode });
+function toStored({ id, userId, version, state, finished, duelCode, daily }: StoredRun): StoredRun {
+  return structuredClone({ id, userId, version, state, finished, duelCode, daily });
 }

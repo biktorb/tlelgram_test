@@ -4,7 +4,7 @@ import { ActionError, Rng, Run, type Action, type RunState } from '@otryad/core'
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
 import type { Config } from '../src/config.ts';
-import { seedGhosts, type Notifier } from '../src/game.ts';
+import { dailySeed, dayOf, seedGhosts, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
 
@@ -95,10 +95,12 @@ for (const [name, makeStore] of stores) {
       duelAnswered: (duel, friend, result) => notified.push({ challengerId: duel.challengerId, friend, result }),
     };
 
+    let clock = Date.now();
+
     before(async () => {
       store = await makeStore();
       await seedGhosts(store, BOT_TEAMS);
-      app = await buildApp(config, store, { notifier });
+      app = await buildApp(config, store, { notifier, now: () => clock });
     });
 
     // Plays a run to the end buying the first shop unit each turn; returns the last turn's body.
@@ -322,6 +324,41 @@ for (const [name, makeStore] of stores) {
       assert.equal(top.find((e: { name: string }) => e.name === 'P70').me, true);
       assert.equal(top.find((e: { name: string }) => e.name === 'P71').me, false);
       assert.equal(top[0].userId, undefined, 'player ids are not exposed');
+    });
+
+    test('daily challenge: same seed for everyone, one attempt, ranked', async () => {
+      const date = dayOf(clock);
+      const daily = async (id: number) => (await app.inject({ method: 'GET', url: '/api/daily', headers: auth(id) })).json().daily;
+      const startDaily = (id: number) => app.inject({ method: 'POST', url: '/api/runs', headers: auth(id), payload: { daily: true } });
+
+      assert.deepEqual(await daily(90), { date, status: 'none', top: [], rank: null });
+      const a = (await startDaily(90)).json().run;
+      assert.equal(a.daily, date);
+      assert.equal(a.state.seed, dailySeed(date));
+      assert.equal((await startDaily(90)).json().run.id, a.id, 'an unfinished daily run is resumed');
+      assert.equal((await daily(90)).status, 'active');
+
+      const b = (await startDaily(91)).json().run;
+      assert.deepEqual(b.state.shop, a.state.shop, 'everyone gets the same first shop');
+
+      const aEnd = (await playToEnd(90, a)).run.state;
+      const again = await startDaily(90);
+      assert.equal(again.statusCode, 409, 'one attempt per day');
+      const bEnd = (await playToEnd(91, b)).run.state;
+
+      const aBetter = aEnd.wins > bEnd.wins || (aEnd.wins === bEnd.wins && aEnd.lives >= bEnd.lives);
+      const da = await daily(90);
+      assert.equal(da.status, 'finished');
+      assert.equal(da.rank, aBetter ? 1 : 2);
+      assert.equal((await daily(91)).rank, aBetter ? 2 : 1);
+      assert.deepEqual(da.top.map((e: { name: string }) => e.name), aBetter ? ['P90', 'P91'] : ['P91', 'P90']);
+      assert.equal(da.top.find((e: { name: string }) => e.name === 'P90').me, true);
+
+      clock += 24 * 3600 * 1000;
+      const next = await daily(90);
+      assert.equal(next.status, 'none', 'a new day brings a new attempt');
+      assert.notEqual(dailySeed(next.date), dailySeed(date));
+      clock -= 24 * 3600 * 1000;
     });
 
     test('ordinary runs have no duel battle', async () => {

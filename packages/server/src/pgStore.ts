@@ -9,6 +9,8 @@ import {
   type DuelInboxItem,
   type DuelResult,
   type ChatEntry,
+  type DailyEntry,
+  DailyTakenError,
   type Ghost,
   type GhostUnit,
   type NewRunOptions,
@@ -85,14 +87,15 @@ export class PgStore implements Store {
       await client.query('BEGIN');
       await client.query('UPDATE runs SET finished = true, updated_at = now() WHERE user_id = $1 AND NOT finished', [userId]);
       const { rows } = await client.query(
-        `INSERT INTO runs (user_id, state, finished, wins, duel_code, chat_instance)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${RUN_COLUMNS}`,
-        [userId, state, state.finished, state.wins, opts.duelCode ?? null, opts.chatInstance ?? null],
+        `INSERT INTO runs (user_id, state, finished, wins, duel_code, chat_instance, daily)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${RUN_COLUMNS}`,
+        [userId, state, state.finished, state.wins, opts.duelCode ?? null, opts.chatInstance ?? null, opts.daily ?? null],
       );
       await client.query('COMMIT');
       return toRun(rows[0]);
     } catch (e) {
       await client.query('ROLLBACK');
+      if ((e as { constraint?: string }).constraint === 'runs_daily_once') throw new DailyTakenError();
       throw e;
     } finally {
       client.release();
@@ -177,6 +180,34 @@ export class PgStore implements Store {
     return rows.map((r) => ({ userName: r.user_name, wins: r.wins, result: r.result, isNew: !r.seen }));
   }
 
+  async dailyRun(userId: number, date: string): Promise<StoredRun | null> {
+    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE user_id = $1 AND daily = $2`, [userId, date]);
+    return rows[0] ? toRun(rows[0]) : null;
+  }
+
+  async dailyTop(date: string, limit: number): Promise<DailyEntry[]> {
+    const { rows } = await this.pool.query<{ user_id: string; name: string; wins: number; lives: number }>(
+      `SELECT r.user_id, u.first_name AS name, r.wins, (r.state->>'lives')::int AS lives
+       FROM runs r JOIN users u ON u.id = r.user_id
+       WHERE r.daily = $1 AND r.finished
+       ORDER BY r.wins DESC, lives DESC, r.updated_at ASC LIMIT $2`,
+      [date, limit],
+    );
+    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, wins: r.wins, lives: r.lives }));
+  }
+
+  async dailyRank(userId: number, date: string): Promise<number | null> {
+    const { rows } = await this.pool.query<{ rank: string }>(
+      `WITH me AS (SELECT wins, (state->>'lives')::int AS lives, updated_at FROM runs WHERE user_id = $1 AND daily = $2 AND finished)
+       SELECT 1 + count(*) AS rank FROM runs r, me
+       WHERE r.daily = $2 AND r.finished AND r.user_id <> $1
+         AND (r.wins, (r.state->>'lives')::int, me.updated_at) > (me.wins, me.lives, r.updated_at)
+       HAVING (SELECT count(*) FROM me) > 0`,
+      [userId, date],
+    );
+    return rows[0] ? Number(rows[0].rank) : null;
+  }
+
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
     const { rows } = await this.pool.query<{ user_id: string; name: string; best: number; runs: string }>(
       `SELECT r.user_id, u.first_name AS name, max(r.wins) AS best, count(*) AS runs
@@ -210,7 +241,7 @@ export class PgStore implements Store {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RUN_COLUMNS = 'id, user_id, version, state, finished, duel_code';
+const RUN_COLUMNS = "id, user_id, version, state, finished, duel_code, to_char(daily, 'YYYY-MM-DD') AS daily";
 const DUEL_COLUMNS = 'code, run_id, challenger_id, challenger_name, seed, wins, team';
 
 function toRun(row: {
@@ -220,8 +251,17 @@ function toRun(row: {
   state: RunState;
   finished: boolean;
   duel_code: string | null;
+  daily: string | null;
 }): StoredRun {
-  return { id: row.id, userId: Number(row.user_id), version: row.version, state: row.state, finished: row.finished, duelCode: row.duel_code };
+  return {
+    id: row.id,
+    userId: Number(row.user_id),
+    version: row.version,
+    state: row.state,
+    finished: row.finished,
+    duelCode: row.duel_code,
+    daily: row.daily,
+  };
 }
 
 function toDuel(row: {

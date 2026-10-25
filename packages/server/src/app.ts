@@ -17,7 +17,7 @@ declare module 'fastify' {
 export async function buildApp(
   config: Config,
   store: Store,
-  opts: { logger?: boolean; notifier?: Notifier | null } = {},
+  opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number } = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 64 * 1024, trustProxy: true });
   const notifier =
@@ -26,7 +26,7 @@ export async function buildApp(
       : config.botToken
         ? new TelegramNotifier(config.botToken, config.appLink, (m) => app.log.warn(m))
         : null;
-  const game = new Game(store, notifier);
+  const game = new Game(store, notifier, opts.now);
   const duelLink = (code: string) => (config.appLink ? `${config.appLink}?startapp=d_${code}` : null);
 
   await app.register(cors, { origin: config.corsOrigins.length ? config.corsOrigins : false });
@@ -67,12 +67,19 @@ export async function buildApp(
     return { run: await game.current(u.id) };
   });
 
-  app.post<{ Body: { duel?: unknown } | null }>('/api/runs', async (req) => {
+  app.post<{ Body: { duel?: unknown; daily?: unknown } | null }>('/api/runs', async (req) => {
     const u = user(req);
     const duel = req.body?.duel;
     if (duel !== undefined && duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     await store.upsertUser(u.id, u.first_name, u.username);
-    return { run: await game.start(u.id, duel ?? null, req.auth!.chatInstance ?? null) };
+    const chat = req.auth!.chatInstance ?? null;
+    if (req.body?.daily === true) return { run: await game.startDaily(u.id, chat) };
+    return { run: await game.start(u.id, duel ?? null, chat) };
+  });
+
+  app.get('/api/daily', async (req) => {
+    const u = user(req);
+    return { daily: await game.daily(u.id) };
   });
 
   // Leaderboard of the chat the game was opened from; null outside a chat.
