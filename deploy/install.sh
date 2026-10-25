@@ -18,7 +18,13 @@ apt-get install -y -qq git curl ca-certificates openssl >/dev/null
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Docker"
-  curl -fsSL https://get.docker.com | sh >/dev/null
+  # get.docker.com gives the newest Docker; Ubuntu's own packages are the fallback
+  # when that host is unreachable from the server.
+  if ! { curl -fsSL --retry 3 https://get.docker.com -o /tmp/get-docker.sh && sh /tmp/get-docker.sh >/dev/null; }; then
+    echo "get.docker.com недоступен, ставлю Docker из репозитория Ubuntu"
+    apt-get install -y -qq docker.io docker-compose-v2 >/dev/null
+    systemctl enable --now docker
+  fi
 fi
 
 # The image build needs more than 1 GB of memory.
