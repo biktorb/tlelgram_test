@@ -7,7 +7,14 @@ set -euo pipefail
 main() {
   cd /opt/otryad
   echo "==> Код"
-  git pull -q --ff-only
+  # The VPS's DNS has been flaky: retry before giving up.
+  local try
+  for try in 1 2 3 4; do
+    git pull -q --ff-only && break
+    [ "$try" = 4 ] && return 1
+    echo "Не удалось скачать код, повтор через 15 с" >&2
+    sleep 15
+  done
   git log -1 --format='%h %s'
   echo "==> Сборка и перезапуск"
   docker compose up -d --build --remove-orphans
