@@ -15,7 +15,16 @@ export interface StoredRun {
 export interface Ghost {
   name: string;
   team: GhostUnit[];
+  frame: string | null; // the frame its player wore
 }
+
+export interface Wallet {
+  fish: number;
+  frame: string | null; // equipped frame, null for the plain one
+  owned: string[];
+}
+
+export type BuyResult = 'ok' | 'owned' | 'poor';
 
 // A finished run shared by link. Friends play from the same seed and their
 // final team fights this team.
@@ -101,7 +110,7 @@ export interface Store {
   // Saves only if the stored version still equals run.version; returns the
   // new version, or null when another request got there first.
   saveRun(run: StoredRun, state: RunState): Promise<number | null>;
-  addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[]): Promise<void>;
+  addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame?: string | null): Promise<void>;
   // Bulk insert of bot teams (no owner) for the cold start.
   addGhosts(rows: { round: number; wins: number; name: string; team: GhostUnit[] }[]): Promise<void>;
   // A recent team from the same round with the closest win count, never the player's own.
@@ -131,6 +140,16 @@ export interface Store {
   // Players of runs started from this chat since the given time, best result first.
   chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]>;
   stats(userId: number): Promise<UserStats>;
+  wallet(userId: number): Promise<Wallet>;
+  // The player's runs played to the end since the given time (abandoned ones
+  // don't count) and their wins.
+  dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }>;
+  claimedTasks(userId: number, day: string): Promise<string[]>;
+  // Pays a task's reward at most once a day; false when it was already paid.
+  claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean>;
+  // Spends fish on an item unless the player owns it or is short of fish.
+  buyItem(userId: number, item: string, price: number): Promise<BuyResult>;
+  setFrame(userId: number, frame: string | null): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -145,16 +164,19 @@ export function closestGhost<T extends { wins: number }>(rows: T[], wins: number
 
 // In-memory store for tests and local development without a database.
 export class MemoryStore implements Store {
-  private users = new Map<number, { firstName: string; username?: string }>();
+  private users = new Map<number, { firstName: string; username?: string; fish: number; frame: string | null; items: Set<string> }>();
+  private claims = new Map<string, number>(); // "user:day:task" -> reward
   private runs = new Map<string, StoredRun & { chatInstance: string | null; updatedAt: number }>();
-  private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[] }[] = [];
+  private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[]; frame: string | null }[] = [];
   private duels = new Map<string, Duel>();
   private duelResults: (DuelResult & { seen: boolean })[] = [];
   private leagues = new Map<string, LeagueEntry & { updatedAt: number }>();
   private seq = 0;
 
   async upsertUser(id: number, firstName: string, username?: string): Promise<void> {
-    this.users.set(id, { firstName, username });
+    const u = this.users.get(id);
+    if (u) Object.assign(u, { firstName, username });
+    else this.users.set(id, { firstName, username, fish: 0, frame: null, items: new Set() });
   }
 
   async activeRun(userId: number): Promise<StoredRun | null> {
@@ -186,12 +208,12 @@ export class MemoryStore implements Store {
     return cur.version;
   }
 
-  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[]): Promise<void> {
-    this.ghosts.push({ round, wins, userId, name, team });
+  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame: string | null = null): Promise<void> {
+    this.ghosts.push({ round, wins, userId, name, team, frame });
   }
 
   async addGhosts(rows: { round: number; wins: number; name: string; team: GhostUnit[] }[]): Promise<void> {
-    for (const r of rows) this.ghosts.push({ ...r, userId: null });
+    for (const r of rows) this.ghosts.push({ ...r, userId: null, frame: null });
   }
 
   async pickGhost(round: number, wins: number, excludeUserId: number, random: () => number): Promise<Ghost | null> {
@@ -199,7 +221,7 @@ export class MemoryStore implements Store {
       .filter((g) => g.round === round && g.userId !== excludeUserId)
       .slice(-GHOST_CANDIDATES);
     const g = closestGhost(rows, wins, random);
-    return g ? { name: g.name, team: g.team } : null;
+    return g ? { name: g.name, team: g.team, frame: g.frame } : null;
   }
 
   async ghostCount(): Promise<number> {
@@ -312,6 +334,45 @@ export class MemoryStore implements Store {
       bestWins: Math.max(0, ...mine.map((r) => r.state.wins)),
       fullRuns: mine.filter((r) => r.state.finished && r.state.lives > 0).length,
     };
+  }
+
+  async wallet(userId: number): Promise<Wallet> {
+    const u = this.users.get(userId);
+    return { fish: u?.fish ?? 0, frame: u?.frame ?? null, owned: [...(u?.items ?? [])] };
+  }
+
+  async dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }> {
+    const done = [...this.runs.values()].filter((r) => r.userId === userId && r.state.finished && r.updatedAt >= since.getTime());
+    return { runs: done.length, wins: done.reduce((n, r) => n + r.state.wins, 0) };
+  }
+
+  async claimedTasks(userId: number, day: string): Promise<string[]> {
+    const prefix = `${userId}:${day}:`;
+    return [...this.claims.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
+  }
+
+  async claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean> {
+    const key = `${userId}:${day}:${task}`;
+    const u = this.users.get(userId);
+    if (!u || this.claims.has(key)) return false;
+    this.claims.set(key, reward);
+    u.fish += reward;
+    return true;
+  }
+
+  async buyItem(userId: number, item: string, price: number): Promise<BuyResult> {
+    const u = this.users.get(userId);
+    if (!u) return 'poor';
+    if (u.items.has(item)) return 'owned';
+    if (u.fish < price) return 'poor';
+    u.fish -= price;
+    u.items.add(item);
+    return 'ok';
+  }
+
+  async setFrame(userId: number, frame: string | null): Promise<void> {
+    const u = this.users.get(userId);
+    if (u) u.frame = frame;
   }
 
   async close(): Promise<void> {}

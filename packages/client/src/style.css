@@ -224,3 +224,26 @@ button:disabled { opacity: .45; cursor: default; }
 .daily-banner { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: 12px; padding: 8px 8px 8px 12px; font-size: 13px; }
 .daily-banner span { flex: 1; }
 .daily-banner button { padding: 8px 14px; border: 1px solid var(--line); }
+
+/* Card frames (cosmetic) */
+.card.frame-gold { box-shadow: 0 0 0 2px #e5b931, 0 0 8px 1px rgba(229, 185, 49, .55); }
+.card.frame-mint { box-shadow: 0 0 0 2px #3ccf9e, 0 0 8px 1px rgba(60, 207, 158, .45); }
+.card.frame-neon { box-shadow: 0 0 0 2px #ff3df2, 0 0 10px 2px rgba(0, 229, 255, .7); }
+.card.frame-rainbow { box-shadow: 0 0 0 2px #ff5a5a, 0 0 0 4px #ffd23f, 0 0 9px 4px rgba(90, 209, 255, .7); }
+.card.frame-cosmos { animation: cosmos 2.4s ease-in-out infinite; }
+@keyframes cosmos {
+  0%, 100% { box-shadow: 0 0 0 2px #7b5cff, 0 0 10px 3px rgba(180, 92, 255, .6); }
+  50% { box-shadow: 0 0 0 2px #5cc8ff, 0 0 16px 5px rgba(92, 120, 255, .7); }
+}
+@media (prefers-reduced-motion: reduce) { .card.frame-cosmos { animation: none; box-shadow: 0 0 0 2px #7b5cff, 0 0 10px 3px rgba(180, 92, 255, .6); } }
+
+.fish-btn { font-weight: 600; }
+.tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.tasks li { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.tasks .top { display: flex; justify-content: space-between; gap: 8px; }
+.tasks .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.tasks .bar i { display: block; height: 100%; background: var(--accent); }
+.tasks li.done .bar i { background: var(--good); }
+.frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px 8px; justify-items: center; }
+.frames .item { display: flex; flex-direction: column; align-items: center; gap: 12px; font-size: 13px; text-align: center; }
+.frames .item button { padding: 6px 10px; font-size: 13px; border: 1px solid var(--line); }

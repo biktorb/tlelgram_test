@@ -82,6 +82,27 @@ export async function buildApp(
     return { daily: await game.daily(u.id) };
   });
 
+  // Fish, frames and today's tasks; finished tasks are paid here.
+  app.get('/api/profile', async (req) => {
+    const u = user(req);
+    await store.upsertUser(u.id, u.first_name, u.username);
+    return { profile: await game.profile(u.id) };
+  });
+
+  app.post<{ Body: { item?: unknown } | null }>('/api/shop/buy', async (req) => {
+    const u = user(req);
+    if (typeof req.body?.item !== 'string') throw new GameError(400, 'Не указан товар');
+    await store.upsertUser(u.id, u.first_name, u.username);
+    return { profile: await game.buy(u.id, req.body.item) };
+  });
+
+  app.post<{ Body: { item?: unknown } | null }>('/api/shop/equip', async (req) => {
+    const u = user(req);
+    const item = req.body?.item ?? null;
+    if (item !== null && typeof item !== 'string') throw new GameError(400, 'Неверная рамка');
+    return { profile: await game.equip(u.id, item) };
+  });
+
   app.get('/api/league', async (req) => {
     const u = user(req);
     return { league: await game.league(u.id) };

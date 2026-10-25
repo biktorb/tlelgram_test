@@ -13,12 +13,14 @@ import {
   DailyTakenError,
   type Ghost,
   type GhostUnit,
+  type BuyResult,
   type LeagueEntry,
   type LeagueRow,
   type NewRunOptions,
   type Store,
   type StoredRun,
   type UserStats,
+  type Wallet,
 } from './store.ts';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations/', import.meta.url));
@@ -113,13 +115,14 @@ export class PgStore implements Store {
     return rows[0]?.version ?? null;
   }
 
-  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[]): Promise<void> {
-    await this.pool.query('INSERT INTO ghosts (round, wins, user_id, name, team) VALUES ($1, $2, $3, $4, $5)', [
+  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame: string | null = null): Promise<void> {
+    await this.pool.query('INSERT INTO ghosts (round, wins, user_id, name, team, frame) VALUES ($1, $2, $3, $4, $5, $6)', [
       round,
       wins,
       userId,
       name,
       JSON.stringify(team),
+      frame,
     ]);
   }
 
@@ -133,14 +136,14 @@ export class PgStore implements Store {
   }
 
   async pickGhost(round: number, wins: number, excludeUserId: number, random: () => number): Promise<Ghost | null> {
-    const { rows } = await this.pool.query<{ wins: number; name: string; team: GhostUnit[] }>(
-      `SELECT wins, name, team FROM ghosts
+    const { rows } = await this.pool.query<{ wins: number; name: string; team: GhostUnit[]; frame: string | null }>(
+      `SELECT wins, name, team, frame FROM ghosts
        WHERE round = $1 AND user_id IS DISTINCT FROM $2
        ORDER BY id DESC LIMIT ${GHOST_CANDIDATES}`,
       [round, excludeUserId],
     );
     const g = closestGhost(rows, wins, random);
-    return g ? { name: g.name, team: g.team } : null;
+    return g ? { name: g.name, team: g.team, frame: g.frame } : null;
   }
 
   async ghostCount(): Promise<number> {
@@ -288,8 +291,67 @@ export class PgStore implements Store {
   }
 
   // Test helper: empties all game tables.
+  async wallet(userId: number): Promise<Wallet> {
+    const { rows } = await this.pool.query<{ fish: number; frame: string | null; owned: string[] }>(
+      `SELECT u.fish, u.frame, coalesce(array_agg(i.item ORDER BY i.created_at) FILTER (WHERE i.item IS NOT NULL), '{}') AS owned
+       FROM users u LEFT JOIN user_items i ON i.user_id = u.id
+       WHERE u.id = $1 GROUP BY u.id`,
+      [userId],
+    );
+    return rows[0] ?? { fish: 0, frame: null, owned: [] };
+  }
+
+  async dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }> {
+    const { rows } = await this.pool.query<{ runs: string; wins: string | null }>(
+      `SELECT count(*) AS runs, sum(wins) AS wins FROM runs WHERE user_id = $1 AND (state->>'finished')::boolean AND updated_at >= $2`,
+      [userId, since],
+    );
+    return { runs: Number(rows[0].runs), wins: Number(rows[0].wins ?? 0) };
+  }
+
+  async claimedTasks(userId: number, day: string): Promise<string[]> {
+    const { rows } = await this.pool.query<{ task: string }>('SELECT task FROM task_claims WHERE user_id = $1 AND day = $2', [userId, day]);
+    return rows.map((r) => r.task);
+  }
+
+  async claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean> {
+    const { rowCount } = await this.pool.query(
+      `WITH claim AS (
+         INSERT INTO task_claims (user_id, day, task, reward) VALUES ($1, $2, $3, $4)
+         ON CONFLICT DO NOTHING RETURNING reward
+       )
+       UPDATE users SET fish = fish + claim.reward FROM claim WHERE users.id = $1`,
+      [userId, day, task, reward],
+    );
+    return rowCount === 1;
+  }
+
+  async buyItem(userId: number, item: string, price: number): Promise<BuyResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const owned = await client.query('INSERT INTO user_items (user_id, item) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, item]);
+      if (owned.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return 'owned';
+      }
+      const paid = await client.query('UPDATE users SET fish = fish - $2 WHERE id = $1 AND fish >= $2', [userId, price]);
+      await client.query(paid.rowCount === 1 ? 'COMMIT' : 'ROLLBACK');
+      return paid.rowCount === 1 ? 'ok' : 'poor';
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  async setFrame(userId: number, frame: string | null): Promise<void> {
+    await this.pool.query('UPDATE users SET frame = $2 WHERE id = $1', [userId, frame]);
+  }
+
   async reset(): Promise<void> {
-    await this.pool.query('TRUNCATE league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
+    await this.pool.query('TRUNCATE task_claims, user_items, league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
   }
 
   async close(): Promise<void> {

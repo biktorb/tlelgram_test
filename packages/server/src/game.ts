@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { ActionError, battle, hashSeed, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
+import { ActionError, battle, DAILY_TASKS, frameById, hashSeed, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
 import { DailyTakenError, type Duel, type LeagueEntry, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
 
 export const MAX_ACTIONS_PER_TURN = 200;
@@ -18,6 +18,13 @@ export interface RunView {
   state: RunState;
   duel: string | null; // code of the duel this run answers
   daily: string | null; // date of the daily challenge this run plays
+}
+
+export interface Profile {
+  fish: number;
+  frame: string | null;
+  owned: string[];
+  tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
 }
 
 export interface DailyInfo {
@@ -81,7 +88,7 @@ export interface DuelInfo {
 export interface TurnResult {
   run: RunView;
   battle: BattleView;
-  enemy: { name: string };
+  enemy: { name: string; frame: string | null };
   // On the last turn of a run that answers a duel: the final team against the challenger's.
   duel?: { battle: BattleView; challengerName: string };
 }
@@ -185,6 +192,40 @@ export class Game {
     await this.store.addLeagueRun({ userId, week, ...place }, dayOf(now), wins, LEAGUE_RUNS_PER_DAY);
   }
 
+  // Daily tasks pay out as soon as they are done; checking again never pays twice.
+  async profile(userId: number): Promise<Profile> {
+    const now = this.now();
+    const day = dayOf(now);
+    const [activity, daily, claimed] = await Promise.all([
+      this.store.dayActivity(userId, new Date(Date.parse(day) - DAY_OFFSET_MS)),
+      this.store.dailyRun(userId, day),
+      this.store.claimedTasks(userId, day),
+    ]);
+    const progress: Record<string, number> = { runs: activity.runs, wins: activity.wins, daily: daily?.finished ? 1 : 0 };
+    const tasks = DAILY_TASKS.map((t) => {
+      const p = Math.min(progress[t.id] ?? 0, t.goal);
+      return { ...t, progress: p, done: p >= t.goal };
+    });
+    for (const t of tasks) if (t.done && !claimed.includes(t.id)) await this.store.claimTask(userId, day, t.id, t.reward);
+    return { ...(await this.store.wallet(userId)), tasks };
+  }
+
+  async buy(userId: number, item: string): Promise<Profile> {
+    const frame = frameById(item);
+    if (!frame) throw new GameError(404, 'Такого товара нет');
+    const res = await this.store.buyItem(userId, frame.id, frame.price);
+    if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
+    if (res === 'ok') await this.store.setFrame(userId, frame.id);
+    return this.profile(userId);
+  }
+
+  // null puts the plain frame back on.
+  async equip(userId: number, item: string | null): Promise<Profile> {
+    if (item !== null && !(await this.store.wallet(userId)).owned.includes(item)) throw new GameError(422, 'Эта рамка ещё не куплена');
+    await this.store.setFrame(userId, item);
+    return this.profile(userId);
+  }
+
   async current(userId: number): Promise<RunView | null> {
     const run = await this.store.activeRun(userId);
     return run ? view(run) : null;
@@ -265,12 +306,13 @@ export class Game {
 
     const newVersion = await this.store.saveRun(stored, run.snapshot());
     if (newVersion === null) throw new GameError(409, 'Забег изменился в другом окне');
-    await this.store.addGhost(round, winsBefore, userId, playerName, team.map(stripUid));
+    const { frame } = await this.store.wallet(userId);
+    await this.store.addGhost(round, winsBefore, userId, playerName, team.map(stripUid), frame);
 
     const result: TurnResult = {
       run: { id: stored.id, version: newVersion, state: run.snapshot(), duel: stored.duelCode, daily: stored.daily },
       battle: battleView(out),
-      enemy: { name: ghost?.name ?? 'Пустая арена' },
+      enemy: { name: ghost?.name ?? 'Пустая арена', frame: ghost?.frame ?? null },
     };
     if (run.s.finished) await this.countLeagueRun(userId, run.s.wins);
     if (run.s.finished && stored.duelCode) {

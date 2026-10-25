@@ -434,6 +434,44 @@ for (const [name, makeStore] of stores) {
       clock = saved;
     });
 
+    test('daily tasks pay fish once; fish buy frames that opponents see', async () => {
+      const profile = async (id: number) => (await app.inject({ method: 'GET', url: '/api/profile', headers: auth(id) })).json().profile;
+      const shop = (id: number, what: 'buy' | 'equip', item: string | null) =>
+        app.inject({ method: 'POST', url: `/api/shop/${what}`, headers: auth(id), payload: { item } });
+      const newRun = async (id: number) => (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(id) })).json().run;
+
+      const fresh = await profile(120);
+      assert.deepEqual([fresh.fish, fresh.frame, fresh.owned], [0, null, []]);
+      assert.deepEqual(fresh.tasks.map((t: { progress: number }) => t.progress), [0, 0, 0]);
+      assert.equal((await shop(120, 'buy', 'gold')).statusCode, 422, 'no fish yet');
+
+      await newRun(120);
+      await newRun(120);
+      assert.equal((await profile(120)).tasks[0].progress, 0, 'abandoned runs do not count');
+
+      let wins = (await playToEnd(120, await newRun(120))).run.state.wins;
+      wins += (await playToEnd(120, await newRun(120))).run.state.wins;
+      const p = await profile(120);
+      assert.deepEqual(p.tasks[0], { id: 'runs', title: 'Сыграйте 2 забега', goal: 2, reward: 20, progress: 2, done: true });
+      assert.equal(p.tasks[1].progress, Math.min(wins, 6));
+      const paid = 20 + (wins >= 6 ? 30 : 0);
+      assert.equal(p.fish, paid);
+      assert.equal((await profile(120)).fish, paid, 'a task pays once');
+
+      await store.claimTask(120, '2000-01-01', 'test', 200);
+      const bought = await shop(120, 'buy', 'gold');
+      assert.equal(bought.statusCode, 200, bought.body);
+      assert.deepEqual([bought.json().profile.fish, bought.json().profile.frame, bought.json().profile.owned], [paid + 100, 'gold', ['gold']]);
+      assert.equal((await shop(120, 'buy', 'gold')).json().profile.fish, paid + 100, 'buying twice is free');
+      assert.equal((await shop(120, 'buy', 'crown')).statusCode, 404);
+      assert.equal((await shop(120, 'equip', 'neon')).statusCode, 422, 'only owned frames');
+      assert.equal((await shop(120, 'equip', null)).json().profile.frame, null);
+      assert.equal((await shop(120, 'equip', 'gold')).json().profile.frame, 'gold');
+
+      await store.addGhost(77, 0, 120, 'P120', [{ id: 'recruit', atk: 2, hp: 2, xp: 0 }], 'gold');
+      assert.equal((await store.pickGhost(77, 0, 1, Math.random))?.frame, 'gold');
+    });
+
     test('ordinary runs have no duel battle', async () => {
       const r = (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(62) })).json().run;
       assert.equal(r.duel, null);

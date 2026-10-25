@@ -1,6 +1,6 @@
 import './style.css';
-import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
-import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type ChatEntry, type DailyInfo, type DuelAnswer, type DuelInfo, type LeagueInfo } from './backend.ts';
+import { ActionError, def, FRAMES, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
+import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type ChatEntry, type DailyInfo, type DuelAnswer, type DuelInfo, type LeagueInfo, type Profile } from './backend.ts';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
 import { canShareStory, haptic, initTelegram, playerName, setBack, shareLink, shareStory, startParam } from './telegram.ts';
@@ -27,6 +27,33 @@ let daily: DailyInfo | null = null;
 
 async function loadDaily(): Promise<void> {
   if (hasDuels(backend)) daily = await backend.dailyInfo().catch(() => null);
+}
+
+// Fish, frames and daily tasks; null offline.
+let profile: Profile | null = null;
+const myFrame = () => (profile?.frame ? `frame-${profile.frame}` : '');
+
+// Reloads the profile; tasks done since the last load pay out and are announced.
+async function loadProfile(): Promise<void> {
+  if (!hasDuels(backend)) return;
+  const before = profile?.fish;
+  profile = await backend.profile().catch(() => profile);
+  const gained = before === undefined || !profile ? 0 : profile.fish - before;
+  if (gained > 0) toast(`+${gained} 🐟 за задания дня`);
+}
+
+async function shopAction(what: 'buy' | 'equip', item: string | null): Promise<void> {
+  if (busy || !hasDuels(backend)) return;
+  busy = true;
+  try {
+    profile = await backend.shop(what, item);
+    haptic.result('success');
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy = false;
+  }
+  renderStore();
 }
 
 // The player's weekly league; null offline.
@@ -114,17 +141,17 @@ async function fight(): Promise<void> {
   try {
     const res = await backend.fight(run);
     run = res.run;
-    if (run.s.finished) await Promise.all([loadChatTop(), loadDaily(), loadLeague()]);
+    if (run.s.finished) await Promise.all([loadChatTop(), loadDaily(), loadLeague(), loadProfile()]);
     const duel = res.duel;
     // A duel run ends with one more battle: the final team against the challenger's.
     const next = duel
       ? () =>
-          playBattle(app, duel.out, { player: playerName(), enemy: duel.challengerName, title: 'Дуэль' }, () => {
+          playBattle(app, duel.out, { player: playerName(), enemy: duel.challengerName, title: 'Дуэль', frames: [profile?.frame ?? null, null] }, () => {
             duelOutcome = { result: duel.out.result, challengerName: duel.challengerName };
             render();
           })
       : render;
-    playBattle(app, res.out, { player: playerName(), enemy: res.enemy, title: `Раунд ${round}` }, next);
+    playBattle(app, res.out, { player: playerName(), enemy: res.enemy, title: `Раунд ${round}`, frames: [profile?.frame ?? null, res.enemyFrame ?? null] }, next);
   } catch (e) {
     showError(e);
     await resync();
@@ -221,7 +248,7 @@ function renderShop(): void {
     const isTarget = shopSel ? !u || u.id === shopSel.id : sel?.kind === 'team' && sel.i !== i && (!u || u.id === s.team[sel.i].id);
     const selected = sel?.kind === 'team' && sel.i === i;
     const el = u
-      ? card(u, `${selected ? 'selected' : ''} ${isTarget ? 'target' : ''}`)
+      ? card(u, `${selected ? 'selected' : ''} ${isTarget ? 'target' : ''} ${myFrame()}`)
       : h('div', { class: `slot ${isTarget ? 'target' : ''}` }, '+');
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
@@ -260,6 +287,9 @@ function renderShop(): void {
       duelName ? h('div', { class: 'duel-note' }, `⚔️ Дуэль с ${duelName}: в конце забега ваш отряд сразится с отрядом соперника`) : null,
       backend.daily ? h('div', { class: 'duel-note' }, `🗓 Вызов дня: у всех сегодня одна стартовая лавка, попытка одна`) : null,
       dailyBanner(),
+      profile && s.round === 1 && s.team.length === 0
+        ? h('button', { class: 'ghost fish-btn', type: 'button', onclick: renderStore }, `🐟 ${profile.fish} · Задания и рамки`)
+        : null,
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Отряд'), h('span', { class: 'muted' }, 'фронт ← → тыл')), h('div', { class: 'row team' }, ...slots)),
       infoPanel(),
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Лавка'), h('span', { class: 'muted' }, `боец ${RULES.buyCost}🪙`)), h('div', { class: 'row shoprow' }, ...(shopCards.length ? shopCards : [h('div', { class: 'empty muted' }, 'Лавка пуста. Обновите её или идите в бой.')]))),
@@ -301,12 +331,13 @@ function renderOver(): void {
       h('h1', {}, won ? 'Забег пройден!' : 'Забег окончен'),
       h('p', { class: 'big' }, `${s.wins} ${plural(s.wins, 'победа', 'победы', 'побед')} за ${s.history.length} ${plural(s.history.length, 'раунд', 'раунда', 'раундов')}`),
       h('p', { class: 'pips', 'aria-label': 'История боёв' }, pips),
-      h('div', { class: 'row team' }, ...s.team.map((u) => card(u))),
+      h('div', { class: 'row team' }, ...s.team.map((u) => card(u, myFrame()))),
       duelLine,
       hasDuels(backend) ? h('button', { class: 'primary', type: 'button', onclick: () => void shareRun() }, '⚔️ Побей мой отряд') : null,
       daily?.status === 'none' ? h('button', { class: 'ghost', type: 'button', onclick: () => void startDaily() }, '🗓 Вызов дня') : null,
       hasDuels(backend) && canShareStory() ? h('button', { class: 'ghost', type: 'button', onclick: () => void shareRun('story') }, '📸 В историю') : null,
       h('button', { class: hasDuels(backend) ? 'ghost' : 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
+      profile ? h('button', { class: 'ghost fish-btn', type: 'button', onclick: renderStore }, `🐟 ${profile.fish} · Задания и рамки`) : null,
       leagueBoard(),
       dailyBoard(),
       chatBoard(),
@@ -398,6 +429,50 @@ function answersList(): HTMLElement | null {
   return h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Ответы на ваши вызовы')), h('ul', {}, ...answers.slice(0, 5).map(line)));
 }
 
+// ---------- Tasks and frames ----------
+
+function renderStore(): void {
+  if (!profile) return render();
+  const p = profile;
+  setBack(render);
+  const task = (t: Profile['tasks'][number]) =>
+    h(
+      'li',
+      { class: t.done ? 'done' : '' },
+      h('div', { class: 'top' }, h('span', {}, `${t.done ? '✅ ' : ''}${t.title}`), h('span', { class: 'muted' }, `${t.progress}/${t.goal} · +${t.reward} 🐟`)),
+      h('div', { class: 'bar' }, h('i', { style: `width: ${(100 * t.progress) / t.goal}%` })),
+    );
+  const sample = { id: 'recruit', atk: 2, hp: 2 };
+  const plain = h(
+    'div',
+    { class: 'item' },
+    card(sample),
+    h('span', {}, 'Обычная'),
+    p.frame === null ? h('span', { class: 'muted' }, 'надета') : h('button', { class: 'ghost', type: 'button', onclick: () => void shopAction('equip', null) }, 'Надеть'),
+  );
+  const frames = FRAMES.map((f) => {
+    const owned = p.owned.includes(f.id);
+    const action =
+      p.frame === f.id
+        ? h('span', { class: 'muted' }, 'надета')
+        : owned
+          ? h('button', { class: 'ghost', type: 'button', onclick: () => void shopAction('equip', f.id) }, 'Надеть')
+          : h('button', { class: p.fish >= f.price ? 'primary' : 'ghost', type: 'button', disabled: p.fish < f.price, onclick: () => void shopAction('buy', f.id) }, `${f.price} 🐟`);
+    return h('div', { class: 'item' }, card(sample, `frame-${f.id}`), h('span', {}, f.name), action);
+  });
+  app.replaceChildren(
+    h(
+      'div',
+      { class: 'screen over store' },
+      h('h1', {}, `🐟 ${p.fish}`),
+      h('p', { class: 'muted small' }, 'Рыбки дают за задания дня. На них покупаются рамки для карточек: их видят и соперники. Сила отряда от рамки не меняется.'),
+      h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Задания дня')), h('ul', { class: 'tasks' }, ...p.tasks.map(task))),
+      h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Рамки')), h('div', { class: 'frames' }, plain, ...frames)),
+      h('button', { class: 'ghost', type: 'button', onclick: render }, 'Назад'),
+    ),
+  );
+}
+
 // ---------- Duel invitation ----------
 
 function renderInvite(duel: DuelInfo): void {
@@ -443,6 +518,7 @@ async function loadDuels(): Promise<DuelInfo | null> {
     loadChatTop(),
     loadDaily(),
     loadLeague().then(announceLeague),
+    loadProfile(),
     (async () => {
       answers = await b.duelAnswers().catch(() => []);
       const fresh = answers.filter((a) => a.isNew);
