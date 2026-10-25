@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ActionError, Rng, Run, type Action, type RunState } from '@otryad/core';
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
-import type { Config } from '../src/config.ts';
+import { loadConfig, type Config } from '../src/config.ts';
 import { dailySeed, dayOf, leagueMove, seedGhosts, weekOf, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
@@ -20,6 +20,7 @@ const config: Config = {
   staticDir: null,
   initDataMaxAgeSec: 3600,
   appLink: 'https://t.me/otryad_bot/play',
+  telegramApi: 'https://api.telegram.org',
 };
 
 function initData(userId: number, name = 'Маша', authDate = Math.floor(Date.now() / 1000)): string {
@@ -64,6 +65,15 @@ describe('initData validation', () => {
   test('rejects stale data', () => {
     const old = initData(7, 'Маша', Math.floor(Date.now() / 1000) - 7200);
     assert.equal(verifyInitData(old, TOKEN, 3600), null);
+  });
+});
+
+describe('config', () => {
+  const env = { DEV_AUTH: '1' };
+  test('the Bot API base can point at a relay', () => {
+    assert.equal(loadConfig(env).telegramApi, 'https://api.telegram.org');
+    assert.equal(loadConfig({ ...env, TELEGRAM_API_BASE: 'https://tg.example.workers.dev/' }).telegramApi, 'https://tg.example.workers.dev');
+    assert.equal(loadConfig({ ...env, TELEGRAM_API_BASE: 'http://insecure.example' }).telegramApi, 'https://api.telegram.org');
   });
 });
 

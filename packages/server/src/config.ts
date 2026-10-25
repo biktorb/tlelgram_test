@@ -8,7 +8,10 @@ export interface Config {
   staticDir: string | null; // serve the built client from here
   initDataMaxAgeSec: number;
   appLink: string | null; // the Mini App's t.me link, for duel invitations
+  telegramApi: string; // Bot API base URL; a relay when the server's network blocks Telegram
 }
+
+const TELEGRAM_API = 'https://api.telegram.org';
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config: Config = {
@@ -21,7 +24,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     staticDir: env.STATIC_DIR || null,
     initDataMaxAgeSec: Number(env.INIT_DATA_MAX_AGE ?? 86400),
     appLink: env.TELEGRAM_APP_LINK?.replace(/\/$/, '') || null,
+    telegramApi: env.TELEGRAM_API_BASE?.replace(/\/$/, '') || TELEGRAM_API,
   };
+  if (!/^https:\/\/[^/\s]+$/.test(config.telegramApi)) {
+    console.warn('TELEGRAM_API_BASE must look like https://<host>; using api.telegram.org');
+    config.telegramApi = TELEGRAM_API;
+  }
   if (config.appLink && !/^https:\/\/t\.me\/\w+\/\w+$/.test(config.appLink)) {
     // A typo here should not take the game down: duels just can't be shared.
     console.warn('TELEGRAM_APP_LINK must look like https://t.me/<bot>/<app>; duel links are off');

@@ -55,6 +55,7 @@
 | `CORS_ORIGIN` | адреса клиента через запятую, если клиент живёт не на сервере (например `https://biktorb.github.io`) |
 | `STATIC_DIR` | папка собранного клиента, чтобы сервер отдавал и игру |
 | `TELEGRAM_APP_LINK` | ссылка на Mini App (`https://t.me/<бот>/<приложение>`) для вызовов; по умолчанию в `docker-compose.yml` стоит ссылка игры |
+| `TELEGRAM_API_BASE` | адрес посредника для Bot API, если сеть сервера блокирует `api.telegram.org` (см. ниже); по умолчанию `https://api.telegram.org` |
 | `PORT` | порт, по умолчанию 3000 |
 | `DEV_AUTH=1` | только для разработки: вход заголовком `dev <id>` (или `dev <id>@<чат>`) без Telegram |
 
@@ -106,6 +107,27 @@ docker compose exec db pg_dump -U otryad otryad > backup.sql   # резервн�
 ```
 
 Вариант без переноса клиента: оставить игру на GitHub Pages, задать в репозитории переменную `API_URL` (Settings → Secrets and variables → Actions → Variables) с адресом сервера и перезапустить «Deploy prototype». Сервер по умолчанию разрешает запросы с `https://biktorb.github.io`.
+
+### Если сервер не достаёт до Telegram
+
+Игре связь с Telegram не нужна: подпись игрока проверяется на сервере. Связь нужна только для сообщений бота, то есть для уведомлений о принятых вызовах и напоминаний. Проверить связь можно так:
+
+```sh
+curl -4 -sS -m 10 -o /dev/null -w "%{http_code}\n" https://api.telegram.org/
+```
+
+Ответ `302` означает, что связь есть. Таймаут означает, что хостер блокирует Telegram. Тогда запросы можно пускать через бесплатный Cloudflare Worker:
+
+1. На dash.cloudflare.com откройте Workers & Pages → Create → Create Worker, назовите его, например, `otryad-tg` и нажмите Deploy.
+2. Нажмите Edit code и вставьте содержимое `deploy/telegram-relay.js`. В `BOT_ID` впишите число до двоеточия из токена бота: оно не секретное. Нажмите Deploy.
+3. На сервере добавьте адрес Worker в `.env` и перезапустите:
+   ```sh
+   cd /opt/otryad
+   echo 'TELEGRAM_API_BASE=https://otryad-tg.<ваш-поддомен>.workers.dev' >> .env
+   docker compose up -d
+   ```
+
+Чтобы проверить работу посредника, отправьте вызов другу. Когда друг доиграет, бот пришлёт вам сообщение. Ошибки отправки видны в `docker compose logs server | grep notification`.
 
 ## Проверено (25.10.2026)
 
