@@ -457,7 +457,9 @@ function renderStore(): void {
         ? h('span', { class: 'muted' }, 'надета')
         : owned
           ? h('button', { class: 'ghost', type: 'button', onclick: () => void shopAction('equip', f.id) }, 'Надеть')
-          : h('button', { class: p.fish >= f.price ? 'primary' : 'ghost', type: 'button', disabled: p.fish < f.price, onclick: () => void shopAction('buy', f.id) }, `${f.price} 🐟`);
+          : f.exclusive
+            ? h('span', { class: 'muted' }, 'награда сезона')
+            : h('button', { class: p.fish >= f.price ? 'primary' : 'ghost', type: 'button', disabled: p.fish < f.price, onclick: () => void shopAction('buy', f.id) }, `${f.price} 🐟`);
     return h('div', { class: 'item' }, card(sample, `frame-${f.id}`), h('span', {}, f.name), action);
   });
   app.replaceChildren(
@@ -467,9 +469,40 @@ function renderStore(): void {
       h('h1', {}, `🐟 ${p.fish}`),
       h('p', { class: 'muted small' }, 'Рыбки дают за задания дня. На них покупаются рамки для карточек: их видят и соперники. Сила отряда от рамки не меняется.'),
       h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Задания дня')), h('ul', { class: 'tasks' }, ...p.tasks.map(task))),
+      seasonSection(p),
       h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Рамки')), h('div', { class: 'frames' }, plain, ...frames)),
       h('button', { class: 'ghost', type: 'button', onclick: render }, 'Назад'),
     ),
+  );
+}
+
+const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+
+function seasonSection(p: Profile): HTMLElement {
+  const s = p.season;
+  const total = s.rewards.length;
+  const into = s.level >= total ? s.perLevel : s.points - s.level * s.perLevel;
+  const days = Math.max(1, Math.ceil((Date.parse(s.endsAt) - Date.now()) / 86_400_000));
+  const reward = (r: Profile['season']['rewards'][number], i: number) =>
+    h(
+      'span',
+      { class: `pass-step ${i < s.level ? 'got' : ''}` },
+      h('b', {}, String(i + 1)),
+      'fish' in r ? `${r.fish}🐟` : '👑',
+    );
+  return h(
+    'section',
+    { class: 'answers' },
+    h('div', { class: 'label' }, h('span', {}, `Сезон: ${MONTHS[Number(s.id.slice(5)) - 1]}`), h('span', { class: 'muted' }, `ещё ${days} ${plural(days, 'день', 'дня', 'дней')}`)),
+    h(
+      'p',
+      { class: 'small' },
+      s.level >= total
+        ? 'Сезонный путь пройден! Корона сезона ваша.'
+        : `Уровень ${s.level} из ${total}. До следующего: ${s.perLevel - into} ${plural(s.perLevel - into, 'победа', 'победы', 'побед')}. Очки сезона дают победы в любых забегах, сыгранных до конца.`,
+    ),
+    h('div', { class: 'bar' }, h('i', { style: `width: ${(100 * into) / s.perLevel}%` })),
+    h('div', { class: 'pass' }, ...s.rewards.map(reward)),
   );
 }
 

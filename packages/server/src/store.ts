@@ -145,8 +145,8 @@ export interface Store {
   // don't count) and their wins.
   dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }>;
   claimedTasks(userId: number, day: string): Promise<string[]>;
-  // Pays a task's reward at most once a day; false when it was already paid.
-  claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean>;
+  // Pays a task's reward (fish, and an item if given) at most once a day; false when it was already paid.
+  claimTask(userId: number, day: string, task: string, reward: number, item?: string): Promise<boolean>;
   // Spends fish on an item unless the player owns it or is short of fish.
   buyItem(userId: number, item: string, price: number): Promise<BuyResult>;
   setFrame(userId: number, frame: string | null): Promise<void>;
@@ -351,12 +351,13 @@ export class MemoryStore implements Store {
     return [...this.claims.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length));
   }
 
-  async claimTask(userId: number, day: string, task: string, reward: number): Promise<boolean> {
+  async claimTask(userId: number, day: string, task: string, reward: number, item?: string): Promise<boolean> {
     const key = `${userId}:${day}:${task}`;
     const u = this.users.get(userId);
     if (!u || this.claims.has(key)) return false;
     this.claims.set(key, reward);
     u.fish += reward;
+    if (item) u.items.add(item);
     return true;
   }
 
