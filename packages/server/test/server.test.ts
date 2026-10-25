@@ -4,7 +4,7 @@ import { ActionError, Rng, Run, type Action, type RunState } from '@otryad/core'
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
 import type { Config } from '../src/config.ts';
-import { seedGhosts } from '../src/game.ts';
+import { seedGhosts, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
 
@@ -19,6 +19,7 @@ const config: Config = {
   corsOrigins: [],
   staticDir: null,
   initDataMaxAgeSec: 3600,
+  appLink: 'https://t.me/otryad_bot/play',
 };
 
 function initData(userId: number, name = 'Маша', authDate = Math.floor(Date.now() / 1000)): string {
@@ -76,12 +77,30 @@ for (const [name, makeStore] of stores) {
   describe(`API with ${name} store`, () => {
     let store: Store;
     let app: Awaited<ReturnType<typeof buildApp>>;
+    const notified: { challengerId: number; friend: string; result: string }[] = [];
+    const notifier: Notifier = {
+      duelAnswered: (duel, friend, result) => notified.push({ challengerId: duel.challengerId, friend, result }),
+    };
 
     before(async () => {
       store = await makeStore();
       await seedGhosts(store, BOT_TEAMS);
-      app = await buildApp(config, store);
+      app = await buildApp(config, store, { notifier });
     });
+
+    // Plays a run to the end buying the first shop unit each turn; returns the last turn's body.
+    const playToEnd = async (userId: number, run: { id: string; version: number; state: RunState }) => {
+      let cur = run;
+      let body: any;
+      while (!cur.state.finished) {
+        const actions = cur.state.team.length < 5 && cur.state.shop.length ? [{ a: 'buy', shop: 0, pos: 0 }] : [];
+        const res = await app.inject({ method: 'POST', url: `/api/runs/${cur.id}/turn`, headers: auth(userId), payload: { version: cur.version, actions } });
+        assert.equal(res.statusCode, 200, res.body);
+        body = res.json();
+        cur = body.run;
+      }
+      return body;
+    };
     after(async () => {
       await app.close();
       await store.close();
@@ -221,6 +240,62 @@ for (const [name, makeStore] of stores) {
         assert.deepEqual(strip(body.battle.start.left), strip(local.s.team));
         cur = body.run;
       }
+    });
+
+    test('duel: share a finished run, a friend answers it from the same seed', async () => {
+      const a = (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(60) })).json().run;
+      const early = await app.inject({ method: 'POST', url: `/api/runs/${a.id}/duel`, headers: auth(60) });
+      assert.equal(early.statusCode, 422, 'an unfinished run cannot be shared');
+      const aLast = await playToEnd(60, a);
+      const aState: RunState = aLast.run.state;
+
+      const notMine = await app.inject({ method: 'POST', url: `/api/runs/${a.id}/duel`, headers: auth(61) });
+      assert.equal(notMine.statusCode, 404);
+      const shared = (await app.inject({ method: 'POST', url: `/api/runs/${a.id}/duel`, headers: auth(60) })).json();
+      assert.match(shared.duel.code, /^[a-zA-Z0-9]{8}$/);
+      assert.equal(shared.link, `https://t.me/otryad_bot/play?startapp=d_${shared.duel.code}`);
+      assert.equal(shared.duel.wins, aState.wins);
+      const again = (await app.inject({ method: 'POST', url: `/api/runs/${a.id}/duel`, headers: auth(60) })).json();
+      assert.equal(again.duel.code, shared.duel.code, 'sharing twice gives the same duel');
+
+      const code = shared.duel.code;
+      const own = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(60), payload: { duel: code } });
+      assert.equal(own.statusCode, 422);
+      const missing = await app.inject({ method: 'POST', url: '/api/runs', headers: auth(61), payload: { duel: 'zzzzzzzz' } });
+      assert.equal(missing.statusCode, 404);
+
+      const preview = (await app.inject({ method: 'GET', url: `/api/duels/${code}`, headers: auth(61) })).json().duel;
+      assert.equal(preview.challengerName, 'P60');
+      assert.equal(preview.mine, false);
+      assert.equal(preview.challengerId, undefined, 'player ids are not exposed');
+      const ownPreview = (await app.inject({ method: 'GET', url: `/api/duels/${code}`, headers: auth(60) })).json().duel;
+      assert.equal(ownPreview.mine, true);
+      assert.deepEqual(preview.team, aState.team.map(({ id, atk, hp, xp }) => ({ id, atk, hp, xp })));
+
+      const b = (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(61), payload: { duel: code } })).json().run;
+      assert.equal(b.duel, code);
+      assert.equal(b.state.seed, aState.seed);
+      assert.deepEqual(b.state.shop, new Run(aState.seed).s.shop, 'same first shop as the challenger');
+
+      const bLast = await playToEnd(61, b);
+      assert.ok(bLast.duel, 'the last turn includes the duel battle');
+      assert.equal(bLast.duel.challengerName, 'P60');
+      const strip = (t: { id: string; atk: number; hp: number; xp: number }[]) => t.map(({ id, atk, hp, xp }) => ({ id, atk, hp, xp }));
+      assert.deepEqual(strip(bLast.duel.battle.start.right), strip(aState.team));
+      assert.deepEqual(strip(bLast.duel.battle.start.left), strip(bLast.run.state.team));
+      assert.deepEqual(notified.at(-1), { challengerId: 60, friend: 'P61', result: bLast.duel.battle.result });
+
+      const inbox = (await app.inject({ method: 'GET', url: '/api/duels', headers: auth(60) })).json().results;
+      assert.deepEqual(inbox, [{ userName: 'P61', wins: bLast.run.state.wins, result: bLast.duel.battle.result, isNew: true }]);
+      const seen = (await app.inject({ method: 'GET', url: '/api/duels', headers: auth(60) })).json().results;
+      assert.equal(seen[0].isNew, false);
+    });
+
+    test('ordinary runs have no duel battle', async () => {
+      const r = (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(62) })).json().run;
+      assert.equal(r.duel, null);
+      const last = await playToEnd(62, r);
+      assert.equal(last.duel, undefined);
     });
 
     test('a new run replaces the active one and stats count both', async () => {

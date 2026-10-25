@@ -4,7 +4,8 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import type { Config } from './config.ts';
 import { verifyInitData, type AuthResult } from './auth.ts';
-import { Game, GameError, parseActions } from './game.ts';
+import { Game, GameError, parseActions, type Notifier } from './game.ts';
+import { TelegramNotifier } from './notify.ts';
 import type { Store } from './store.ts';
 
 declare module 'fastify' {
@@ -13,9 +14,20 @@ declare module 'fastify' {
   }
 }
 
-export async function buildApp(config: Config, store: Store, opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildApp(
+  config: Config,
+  store: Store,
+  opts: { logger?: boolean; notifier?: Notifier | null } = {},
+): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 64 * 1024, trustProxy: true });
-  const game = new Game(store);
+  const notifier =
+    opts.notifier !== undefined
+      ? opts.notifier
+      : config.botToken
+        ? new TelegramNotifier(config.botToken, config.appLink, (m) => app.log.warn(m))
+        : null;
+  const game = new Game(store, notifier);
+  const duelLink = (code: string) => (config.appLink ? `${config.appLink}?startapp=d_${code}` : null);
 
   await app.register(cors, { origin: config.corsOrigins.length ? config.corsOrigins : false });
 
@@ -55,10 +67,31 @@ export async function buildApp(config: Config, store: Store, opts: { logger?: bo
     return { run: await game.current(u.id) };
   });
 
-  app.post('/api/runs', async (req) => {
+  app.post<{ Body: { duel?: unknown } | null }>('/api/runs', async (req) => {
     const u = user(req);
+    const duel = req.body?.duel;
+    if (duel !== undefined && duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     await store.upsertUser(u.id, u.first_name, u.username);
-    return { run: await game.start(u.id) };
+    return { run: await game.start(u.id, duel ?? null) };
+  });
+
+  // Shares a finished run as a duel and returns the link for friends.
+  app.post<{ Params: { id: string } }>('/api/runs/:id/duel', async (req) => {
+    const u = user(req);
+    const { challengerId: _, ...duel } = await game.share(u.id, u.first_name || 'Игрок', req.params.id);
+    return { duel, link: duelLink(duel.code) };
+  });
+
+  app.get<{ Params: { code: string } }>('/api/duels/:code', async (req) => {
+    const u = user(req);
+    const { challengerId, ...duel } = await game.duelInfo(req.params.code);
+    return { duel: { ...duel, mine: challengerId === u.id } };
+  });
+
+  // Friends' answers to the player's duels; new ones are marked seen.
+  app.get('/api/duels', async (req) => {
+    const u = user(req);
+    return { results: await game.inbox(u.id) };
   });
 
   app.post<{ Params: { id: string }; Body: { version?: unknown; actions?: unknown } }>('/api/runs/:id/turn', async (req) => {

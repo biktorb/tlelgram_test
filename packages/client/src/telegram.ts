@@ -27,6 +27,7 @@ interface WebApp {
   setHeaderColor?(color: string): void;
   setBackgroundColor?(color: string): void;
   onEvent(name: string, cb: () => void): void;
+  openTelegramLink?(url: string): void;
   BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
   HapticFeedback?: {
     impactOccurred(style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft'): void;
@@ -87,6 +88,19 @@ export function initTelegram(): void {
 // Signed launch data for the server; empty outside Telegram.
 export function initData(): string {
   return inTelegram ? tg!.initData : '';
+}
+
+// The startapp parameter of the link the game was opened with, e.g. "d_AbC123xy".
+export function startParam(): string {
+  if (inTelegram) return tg!.initDataUnsafe.start_param ?? '';
+  return new URLSearchParams(location.search).get('startapp') ?? '';
+}
+
+// Opens Telegram's "share to chat" picker with a link and a message.
+export function shareLink(url: string, text: string): void {
+  const share = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+  if (inTelegram && tg!.openTelegramLink) tg!.openTelegramLink(share);
+  else window.open(share, '_blank', 'noopener');
 }
 
 export function playerName(): string {
