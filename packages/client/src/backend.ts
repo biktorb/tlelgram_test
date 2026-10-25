@@ -88,6 +88,8 @@ export interface DuelBackend extends Backend {
   dailyInfo(): Promise<DailyInfo>;
   league(): Promise<LeagueInfo>;
   profile(): Promise<Profile>;
+  // Reports a product event; failures are ignored.
+  track(name: 'share_chat' | 'share_story' | 'open_store'): void;
   shop(what: 'buy' | 'equip', item: string | null): Promise<Profile>;
 }
 
@@ -194,6 +196,10 @@ export class OnlineBackend implements DuelBackend {
   async newRun(opts: { duel?: string; daily?: boolean } = {}): Promise<Run> {
     const { run } = await this.call<{ run: RunView }>('POST', '/api/runs', opts);
     return this.adopt(run);
+  }
+
+  track(name: string): void {
+    this.call('POST', '/api/events', { name }).catch(() => {});
   }
 
   async profile(): Promise<Profile> {

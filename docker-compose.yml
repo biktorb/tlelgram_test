@@ -29,6 +29,8 @@ services:
       TELEGRAM_APP_LINK: ${TELEGRAM_APP_LINK:-https://t.me/squad_play_bot/Squad}
       # A relay for the Bot API when the server's network blocks api.telegram.org (docs/server.md).
       TELEGRAM_API_BASE: ${TELEGRAM_API_BASE:-}
+      # Opens the closed-test stats page (docs/server.md); unset turns it off.
+      ADMIN_KEY: ${ADMIN_KEY:-}
     restart: unless-stopped
 
   # Gets a Let's Encrypt certificate for DOMAIN and proxies to the server.

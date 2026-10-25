@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
@@ -6,6 +7,7 @@ import type { Config } from './config.ts';
 import { verifyInitData, type AuthResult } from './auth.ts';
 import { Game, GameError, parseActions, type Notifier } from './game.ts';
 import { TelegramNotifier } from './notify.ts';
+import { CLIENT_EVENTS, computeStats } from './stats.ts';
 import type { Store } from './store.ts';
 
 declare module 'fastify' {
@@ -64,6 +66,7 @@ export async function buildApp(
 
   app.get('/api/runs/current', async (req) => {
     const u = user(req);
+    await game.track(u.id, 'open');
     return { run: await game.current(u.id) };
   });
 
@@ -80,6 +83,28 @@ export async function buildApp(
   app.get('/api/daily', async (req) => {
     const u = user(req);
     return { daily: await game.daily(u.id) };
+  });
+
+  app.post<{ Body: { name?: unknown } | null }>('/api/events', async (req, reply) => {
+    const u = user(req);
+    const name = req.body?.name;
+    if (typeof name !== 'string' || !CLIENT_EVENTS.has(name)) throw new GameError(400, 'Неизвестное событие');
+    await game.track(u.id, name);
+    return reply.status(204).send();
+  });
+
+  // Closed-test metrics for the owner; the key comes in the x-admin-key header
+  // (the /admin.html page sends it) or as ?key= for a quick look.
+  app.get<{ Querystring: { key?: string; days?: string } }>('/api/admin/stats', async (req) => {
+    const header = req.headers['x-admin-key'];
+    const key = Buffer.from((typeof header === 'string' ? header : req.query.key) ?? '');
+    const want = Buffer.from(config.adminKey ?? '');
+    if (!config.adminKey || key.length !== want.length || !timingSafeEqual(key, want)) throw new GameError(404, 'Not found');
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
+    const now = (opts.now ?? Date.now)();
+    // Retention needs players' first days, so look a week further back than the table.
+    const events = await store.eventsSince(new Date(now - (days + 7) * 24 * 3600 * 1000));
+    return computeStats(events, now, days);
   });
 
   // Fish, frames and today's tasks; finished tasks are paid here.

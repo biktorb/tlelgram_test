@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Отряд: статистика</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f6fa; --card: #fff; --ink: #1b2230; --muted: #6b7486; --line: #dfe3ea; --good: #2e9e5b; --bad: #c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #12161f; --card: #1b2130; --ink: #e8ecf3; --muted: #95a0b4; --line: #2c3446; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+  .tile b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--muted); font-size: 13px; }
+  .ok { color: var(--good); } .low { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 6px; white-space: nowrap; text-align: right; border-bottom: 1px solid var(--line); font-size: 14px; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  form { display: flex; gap: 8px; } input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+  button { padding: 10px 14px; border-radius: 8px; border: 0; background: #2f80ed; color: #fff; font-weight: 600; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Отряд: закрытый тест</h1>
+  <div id="out"></div>
+</main>
+<script>
+  // The key stays in this browser (localStorage) and goes to the server in a header.
+  const out = document.getElementById('out');
+  const store = { get: () => { try { return localStorage.getItem('otryad-admin-key'); } catch { return null; } },
+                  set: (v) => { try { localStorage.setItem('otryad-admin-key', v); } catch {} } };
+  const pct = (r) => (r.rate === null ? '—' : `${Math.round(r.rate * 100)}%`);
+  const tile = (value, label, goal) => {
+    const cls = goal === undefined || value === null ? '' : value >= goal ? 'ok' : 'low';
+    return `<div class="tile"><b class="${cls}">${label.fmt(value)}</b><span>${label.text}</span></div>`;
+  };
+  function askKey(msg) {
+    out.innerHTML = `<p>${msg}</p><form><input type="password" placeholder="ADMIN_KEY" autocomplete="off"><button>Открыть</button></form>`;
+    out.querySelector('form').onsubmit = (e) => { e.preventDefault(); store.set(out.querySelector('input').value.trim()); load(); };
+  }
+  async function load() {
+    const key = store.get();
+    if (!key) return askKey('Введите ключ из ADMIN_KEY на сервере.');
+    const res = await fetch('api/admin/stats?days=14', { headers: { 'x-admin-key': key } }).catch(() => null);
+    if (!res || !res.ok) return askKey(res ? 'Ключ не подошёл.' : 'Сервер недоступен.');
+    const s = await res.json();
+    const p = (r) => ({ fmt: () => pct(r) });
+    out.innerHTML =
+      '<div class="tiles">' +
+      tile(s.retention.d1.rate, { ...p(s.retention.d1), text: `D1 (цель 35%), из ${s.retention.d1.of}` }, 0.35) +
+      tile(s.retention.d7.rate, { ...p(s.retention.d7), text: `D7 (цель 12%), из ${s.retention.d7.of}` }, 0.12) +
+      tile(s.minutesPerActiveDay, { fmt: (v) => `${v} мин`, text: 'в день у играющих (цель 15)' }, 15) +
+      tile(s.shareRate.rate, { ...p(s.shareRate), text: `забегов с вызовом или историей (цель 30%), из ${s.shareRate.of}` }, 0.3) +
+      '</div><div class="wrap"><table><tr><th>День</th><th>Игроки</th><th>Новые</th><th>Забеги</th><th>Доиграно</th><th>Поделились</th></tr>' +
+      s.days.map((d) => `<tr><td>${d.date.slice(8)}.${d.date.slice(5, 7)}</td><td>${d.activeUsers}</td><td>${d.newUsers}</td><td>${d.runsStarted}</td><td>${d.runsFinished}</td><td>${d.shares}</td></tr>`).join('') +
+      '</table></div>';
+  }
+  load();
+</script>
+</body>
+</html>

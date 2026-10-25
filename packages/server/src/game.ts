@@ -127,6 +127,15 @@ export class Game {
     this.now = now;
   }
 
+  // Analytics must never break the game.
+  async track(userId: number, name: string, data: Record<string, unknown> | null = null): Promise<void> {
+    try {
+      await this.store.addEvent(userId, name, data);
+    } catch {
+      // ignored
+    }
+  }
+
   // Today's challenge: everyone starts from the same seed, one attempt each.
   async startDaily(userId: number, chatInstance: string | null = null): Promise<RunView> {
     const date = dayOf(this.now());
@@ -134,7 +143,9 @@ export class Game {
     if (existing && !existing.finished) return view(existing);
     if (existing) throw new GameError(409, 'Вызов дня уже сыгран, новый будет завтра');
     try {
-      return view(await this.store.createRun(userId, new Run(dailySeed(date)).snapshot(), { daily: date, chatInstance }));
+      const run = view(await this.store.createRun(userId, new Run(dailySeed(date)).snapshot(), { daily: date, chatInstance }));
+      await this.track(userId, 'run_start', { mode: 'daily' });
+      return run;
     } catch (e) {
       if (e instanceof DailyTakenError) throw new GameError(409, 'Вызов дня уже начат в другом окне');
       throw e;
@@ -251,7 +262,10 @@ export class Game {
     if (frame.exclusive) throw new GameError(422, 'Эту рамку можно только заработать в сезоне');
     const res = await this.store.buyItem(userId, frame.id, frame.price);
     if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
-    if (res === 'ok') await this.store.setFrame(userId, frame.id);
+    if (res === 'ok') {
+      await this.store.setFrame(userId, frame.id);
+      await this.track(userId, 'shop_buy', { item: frame.id, price: frame.price });
+    }
     return this.profile(userId);
   }
 
@@ -271,11 +285,15 @@ export class Game {
   async start(userId: number, duelCode: string | null = null, chatInstance: string | null = null): Promise<RunView> {
     if (duelCode === null) {
       const run = new Run(randomInt(0, 2 ** 31));
-      return view(await this.store.createRun(userId, run.snapshot(), { chatInstance }));
+      const stored = await this.store.createRun(userId, run.snapshot(), { chatInstance });
+      await this.track(userId, 'run_start', { mode: 'normal' });
+      return view(stored);
     }
     const duel = await this.duel(duelCode);
     if (duel.challengerId === userId) throw new GameError(422, 'Это ваш собственный вызов');
-    return view(await this.store.createRun(userId, new Run(duel.seed).snapshot(), { duelCode: duel.code, chatInstance }));
+    const stored = await this.store.createRun(userId, new Run(duel.seed).snapshot(), { duelCode: duel.code, chatInstance });
+    await this.track(userId, 'run_start', { mode: 'duel' });
+    return view(stored);
   }
 
   // The week's best results of runs started from the chat the game was opened from.
@@ -290,8 +308,9 @@ export class Game {
     const stored = await this.store.getRun(runId);
     if (!stored || stored.userId !== userId) throw new GameError(404, 'Забег не найден');
     if (!stored.state.finished) throw new GameError(422, 'Забег ещё не окончен');
+    const code = newCode();
     const duel = await this.store.createDuel({
-      code: newCode(),
+      code,
       runId,
       challengerId: userId,
       challengerName: playerName,
@@ -299,6 +318,7 @@ export class Game {
       wins: stored.state.wins,
       team: stored.state.team.map(stripUid),
     });
+    if (duel.code === code) await this.track(userId, 'duel_share');
     return info(duel);
   }
 
@@ -350,7 +370,11 @@ export class Game {
       battle: battleView(out),
       enemy: { name: ghost?.name ?? 'Пустая арена', frame: ghost?.frame ?? null },
     };
-    if (run.s.finished) await this.countLeagueRun(userId, run.s.wins);
+    if (!run.s.finished) await this.track(userId, 'turn');
+    if (run.s.finished) {
+      await this.countLeagueRun(userId, run.s.wins);
+      await this.track(userId, 'run_end', { wins: run.s.wins, duel: stored.duelCode !== null, daily: stored.daily !== null });
+    }
     if (run.s.finished && stored.duelCode) {
       result.duel = await this.finishDuel(stored, userId, playerName, run.s.wins, team.map(stripUid));
     }
