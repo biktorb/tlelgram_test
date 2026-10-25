@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { ActionError, battle, DAILY_TASKS, frameById, hashSeed, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
+import { ActionError, battle, DAILY_TASKS, frameById, hashSeed, Run, SEASON_PASS, SEASON_POINTS_PER_LEVEL, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
 import { DailyTakenError, type Duel, type LeagueEntry, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
 
 export const MAX_ACTIONS_PER_TURN = 200;
@@ -25,6 +25,14 @@ export interface Profile {
   frame: string | null;
   owned: string[];
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
+  season: {
+    id: string; // YYYY-MM
+    endsAt: string;
+    points: number;
+    perLevel: number;
+    level: number; // levels reached, 0..rewards.length
+    rewards: ({ fish: number } | { frame: string })[];
+  };
 }
 
 export interface DailyInfo {
@@ -207,12 +215,40 @@ export class Game {
       return { ...t, progress: p, done: p >= t.goal };
     });
     for (const t of tasks) if (t.done && !claimed.includes(t.id)) await this.store.claimTask(userId, day, t.id, t.reward);
-    return { ...(await this.store.wallet(userId)), tasks };
+    const season = await this.season(userId, day);
+    return { ...(await this.store.wallet(userId)), tasks, season };
+  }
+
+  // The month's pass: wins earn points, every level reached pays once.
+  private async season(userId: number, day: string): Promise<Profile['season']> {
+    const id = day.slice(0, 7);
+    const start = `${id}-01`;
+    const next = new Date(Date.parse(start));
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const [{ wins: points }, claimed] = await Promise.all([
+      this.store.dayActivity(userId, new Date(Date.parse(start) - DAY_OFFSET_MS)),
+      this.store.claimedTasks(userId, start),
+    ]);
+    const level = Math.min(Math.floor(points / SEASON_POINTS_PER_LEVEL), SEASON_PASS.length);
+    for (let i = 0; i < level; i++) {
+      if (claimed.includes(`pass${i + 1}`)) continue;
+      const r = SEASON_PASS[i];
+      await this.store.claimTask(userId, start, `pass${i + 1}`, 'fish' in r ? r.fish : 0, 'frame' in r ? r.frame : undefined);
+    }
+    return {
+      id,
+      endsAt: new Date(next.getTime() - DAY_OFFSET_MS).toISOString(),
+      points,
+      perLevel: SEASON_POINTS_PER_LEVEL,
+      level,
+      rewards: SEASON_PASS,
+    };
   }
 
   async buy(userId: number, item: string): Promise<Profile> {
     const frame = frameById(item);
     if (!frame) throw new GameError(404, 'Такого товара нет');
+    if (frame.exclusive) throw new GameError(422, 'Эту рамку можно только заработать в сезоне');
     const res = await this.store.buyItem(userId, frame.id, frame.price);
     if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
     if (res === 'ok') await this.store.setFrame(userId, frame.id);
