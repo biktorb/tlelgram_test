@@ -207,3 +207,15 @@ button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 360px) { :root { --card: 56px; } .card .ico { font-size: 26px; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: .01s !important; } }
 .loading { justify-content: center; align-items: center; }
+
+/* Duels */
+.duel-note { background: var(--surface); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
+.duel-result { font-weight: 700; font-size: 17px; margin: 0; }
+.duel-result.win { color: var(--good); }
+.duel-result.loss { color: var(--bad); }
+.over .row { justify-content: center; }
+.invite h1 { font-size: 22px; }
+.invite p { margin: 0; }
+.answers { text-align: left; background: var(--surface); border-radius: 12px; padding: 10px 14px; }
+.answers ul { margin: 0; padding-left: 18px; font-size: 14px; }
+.answers li.new { font-weight: 700; }

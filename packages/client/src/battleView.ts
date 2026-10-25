@@ -5,7 +5,7 @@ import { haptic, setBack } from './telegram.ts';
 export interface BattleNames {
   player: string;
   enemy: string;
-  round: number;
+  title: string;
 }
 
 const BASE_MS = {
@@ -50,7 +50,7 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
     h(
       'div',
       { class: 'screen battle' },
-      h('div', { class: 'battle-head' }, h('span', {}, `Раунд ${names.round}`), h('div', { class: 'battle-ctl' }, speedBtn, skipBtn)),
+      h('div', { class: 'battle-head' }, h('span', {}, names.title), h('div', { class: 'battle-ctl' }, speedBtn, skipBtn)),
       h('div', { class: 'side-name' }, names.enemy),
       rows[1],
       h('div', { class: 'clash', 'aria-hidden': 'true' }, '⚔'),

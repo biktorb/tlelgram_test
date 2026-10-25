@@ -2,7 +2,18 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import type { RunState } from '@otryad/core';
-import { closestGhost, GHOST_CANDIDATES, type Ghost, type GhostUnit, type Store, type StoredRun, type UserStats } from './store.ts';
+import {
+  closestGhost,
+  GHOST_CANDIDATES,
+  type Duel,
+  type DuelInboxItem,
+  type DuelResult,
+  type Ghost,
+  type GhostUnit,
+  type Store,
+  type StoredRun,
+  type UserStats,
+} from './store.ts';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations/', import.meta.url));
 
@@ -54,20 +65,26 @@ export class PgStore implements Store {
 
   async activeRun(userId: number): Promise<StoredRun | null> {
     const { rows } = await this.pool.query(
-      'SELECT id, user_id, version, state, finished FROM runs WHERE user_id = $1 AND NOT finished',
+      `SELECT ${RUN_COLUMNS} FROM runs WHERE user_id = $1 AND NOT finished`,
       [userId],
     );
     return rows[0] ? toRun(rows[0]) : null;
   }
 
-  async createRun(userId: number, state: RunState): Promise<StoredRun> {
+  async getRun(runId: string): Promise<StoredRun | null> {
+    if (!UUID.test(runId)) return null;
+    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [runId]);
+    return rows[0] ? toRun(rows[0]) : null;
+  }
+
+  async createRun(userId: number, state: RunState, duelCode: string | null = null): Promise<StoredRun> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
       await client.query('UPDATE runs SET finished = true, updated_at = now() WHERE user_id = $1 AND NOT finished', [userId]);
       const { rows } = await client.query(
-        'INSERT INTO runs (user_id, state, finished, wins) VALUES ($1, $2, $3, $4) RETURNING id, user_id, version, state, finished',
-        [userId, state, state.finished, state.wins],
+        `INSERT INTO runs (user_id, state, finished, wins, duel_code) VALUES ($1, $2, $3, $4, $5) RETURNING ${RUN_COLUMNS}`,
+        [userId, state, state.finished, state.wins, duelCode],
       );
       await client.query('COMMIT');
       return toRun(rows[0]);
@@ -123,6 +140,40 @@ export class PgStore implements Store {
     return Number(rows[0].n);
   }
 
+  async createDuel(duel: Duel): Promise<Duel> {
+    await this.pool.query(
+      `INSERT INTO duels (code, run_id, challenger_id, challenger_name, seed, wins, team)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (run_id) DO NOTHING`,
+      [duel.code, duel.runId, duel.challengerId, duel.challengerName, duel.seed, duel.wins, JSON.stringify(duel.team)],
+    );
+    const { rows } = await this.pool.query(`SELECT ${DUEL_COLUMNS} FROM duels WHERE run_id = $1`, [duel.runId]);
+    return toDuel(rows[0]);
+  }
+
+  async getDuel(code: string): Promise<Duel | null> {
+    const { rows } = await this.pool.query(`SELECT ${DUEL_COLUMNS} FROM duels WHERE code = $1`, [code]);
+    return rows[0] ? toDuel(rows[0]) : null;
+  }
+
+  async addDuelResult(r: DuelResult): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO duel_results (duel_code, run_id, user_id, user_name, wins, team, battle_seed, result)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (run_id) DO NOTHING`,
+      [r.duelCode, r.runId, r.userId, r.userName, r.wins, JSON.stringify(r.team), r.battleSeed, r.result],
+    );
+  }
+
+  async takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]> {
+    const { rows } = await this.pool.query<{ id: string; user_name: string; wins: number; result: DuelInboxItem['result']; seen: boolean }>(
+      `SELECT r.id, r.user_name, r.wins, r.result, r.seen FROM duel_results r JOIN duels d ON d.code = r.duel_code
+       WHERE d.challenger_id = $1 ORDER BY r.id DESC LIMIT $2`,
+      [challengerId, limit],
+    );
+    const unseen = rows.filter((r) => !r.seen).map((r) => r.id);
+    if (unseen.length) await this.pool.query('UPDATE duel_results SET seen = true WHERE id = ANY($1::bigint[])', [unseen]);
+    return rows.map((r) => ({ userName: r.user_name, wins: r.wins, result: r.result, isNew: !r.seen }));
+  }
+
   async stats(userId: number): Promise<UserStats> {
     const { rows } = await this.pool.query<{ runs: string; best: number | null; full: string }>(
       `SELECT count(*) AS runs, max(wins) AS best,
@@ -135,7 +186,7 @@ export class PgStore implements Store {
 
   // Test helper: empties all game tables.
   async reset(): Promise<void> {
-    await this.pool.query('TRUNCATE ghosts, runs, users RESTART IDENTITY CASCADE');
+    await this.pool.query('TRUNCATE duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
   }
 
   async close(): Promise<void> {
@@ -143,6 +194,37 @@ export class PgStore implements Store {
   }
 }
 
-function toRun(row: { id: string; user_id: string | number; version: number; state: RunState; finished: boolean }): StoredRun {
-  return { id: row.id, userId: Number(row.user_id), version: row.version, state: row.state, finished: row.finished };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RUN_COLUMNS = 'id, user_id, version, state, finished, duel_code';
+const DUEL_COLUMNS = 'code, run_id, challenger_id, challenger_name, seed, wins, team';
+
+function toRun(row: {
+  id: string;
+  user_id: string | number;
+  version: number;
+  state: RunState;
+  finished: boolean;
+  duel_code: string | null;
+}): StoredRun {
+  return { id: row.id, userId: Number(row.user_id), version: row.version, state: row.state, finished: row.finished, duelCode: row.duel_code };
+}
+
+function toDuel(row: {
+  code: string;
+  run_id: string;
+  challenger_id: string | number;
+  challenger_name: string;
+  seed: string | number;
+  wins: number;
+  team: GhostUnit[];
+}): Duel {
+  return {
+    code: row.code,
+    runId: row.run_id,
+    challengerId: Number(row.challenger_id),
+    challengerName: row.challenger_name,
+    seed: Number(row.seed),
+    wins: row.wins,
+    team: row.team,
+  };
 }

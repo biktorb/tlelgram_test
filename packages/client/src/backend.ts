@@ -1,21 +1,48 @@
-import { Run, type Action, type BattleOutcome, type RunState, type Unit } from '@otryad/core';
+import { Run, type Action, type BattleOutcome, type BattleResult, type RunState, type Unit } from '@otryad/core';
 import ghostData from './ghosts.json';
 import { initData } from './telegram.ts';
 
 export interface TurnOutcome {
   out: BattleOutcome;
   enemy: string;
+  // Last turn of a duel run: the final team against the challenger's.
+  duel?: { out: BattleOutcome; challengerName: string };
+}
+
+export interface DuelInfo {
+  code: string;
+  challengerName: string;
+  wins: number;
+  team: Omit<Unit, 'uid'>[];
+  mine?: boolean; // the player's own duel
+}
+
+export interface DuelAnswer {
+  userName: string;
+  wins: number;
+  result: BattleResult; // the friend's result
+  isNew: boolean;
 }
 
 // Where runs live: in this browser (offline) or on the game server (online).
 export interface Backend {
   readonly online: boolean;
+  // Code of the duel the current run answers, if any.
+  readonly duel: string | null;
   load(): Promise<Run>;
-  newRun(): Promise<Run>;
+  newRun(duel?: string): Promise<Run>;
   // Called after an action was applied to the local run.
   record(run: Run, action: Action): void;
   // Ends the shop phase and fights. Returns the run as it is after the battle.
   fight(run: Run): Promise<TurnOutcome & { run: Run }>;
+}
+
+// Duels need the server: only the online backend has them.
+export interface DuelBackend extends Backend {
+  // Shares the current (finished) run; link is null when the server has no app link configured.
+  share(): Promise<{ duel: DuelInfo; link: string | null }>;
+  duelInfo(code: string): Promise<DuelInfo>;
+  duelAnswers(): Promise<DuelAnswer[]>;
 }
 
 export class ApiError extends Error {
@@ -36,6 +63,7 @@ const STORE_KEY = 'otryad.run.v1';
 
 export class OfflineBackend implements Backend {
   readonly online = false;
+  readonly duel = null;
 
   async load(): Promise<Run> {
     try {
@@ -92,10 +120,12 @@ interface RunView {
   id: string;
   version: number;
   state: RunState;
+  duel: string | null;
 }
 
-export class OnlineBackend implements Backend {
+export class OnlineBackend implements DuelBackend {
   readonly online = true;
+  duel: string | null = null;
   private base: string;
   private auth: string;
   private runId = '';
@@ -112,9 +142,21 @@ export class OnlineBackend implements Backend {
     return run ? this.adopt(run) : this.newRun();
   }
 
-  async newRun(): Promise<Run> {
-    const { run } = await this.call<{ run: RunView }>('POST', '/api/runs');
+  async newRun(duel?: string): Promise<Run> {
+    const { run } = await this.call<{ run: RunView }>('POST', '/api/runs', duel ? { duel } : {});
     return this.adopt(run);
+  }
+
+  share(): Promise<{ duel: DuelInfo; link: string | null }> {
+    return this.call('POST', `/api/runs/${this.runId}/duel`);
+  }
+
+  async duelInfo(code: string): Promise<DuelInfo> {
+    return (await this.call<{ duel: DuelInfo }>('GET', `/api/duels/${encodeURIComponent(code)}`)).duel;
+  }
+
+  async duelAnswers(): Promise<DuelAnswer[]> {
+    return (await this.call<{ results: DuelAnswer[] }>('GET', '/api/duels')).results;
   }
 
   record(_run: Run, action: Action): void {
@@ -122,17 +164,24 @@ export class OnlineBackend implements Backend {
   }
 
   async fight(): Promise<TurnOutcome & { run: Run }> {
-    const res = await this.call<{ run: RunView; battle: BattleOutcome; enemy: { name: string } }>(
-      'POST',
-      `/api/runs/${this.runId}/turn`,
-      { version: this.version, actions: this.actions },
-    );
-    return { out: res.battle, enemy: res.enemy.name, run: this.adopt(res.run) };
+    const res = await this.call<{
+      run: RunView;
+      battle: BattleOutcome;
+      enemy: { name: string };
+      duel?: { battle: BattleOutcome; challengerName: string };
+    }>('POST', `/api/runs/${this.runId}/turn`, { version: this.version, actions: this.actions });
+    return {
+      out: res.battle,
+      enemy: res.enemy.name,
+      duel: res.duel && { out: res.duel.battle, challengerName: res.duel.challengerName },
+      run: this.adopt(res.run),
+    };
   }
 
   private adopt(view: RunView): Run {
     this.runId = view.id;
     this.version = view.version;
+    this.duel = view.duel ?? null;
     this.actions = [];
     return new Run(view.state.seed, view.state);
   }
@@ -164,4 +213,8 @@ export function chooseBackend(): Backend {
   const dev = new URLSearchParams(location.search).get('dev');
   if (dev) return new OnlineBackend(base, `dev ${dev}`);
   return new OfflineBackend();
+}
+
+export function hasDuels(b: Backend): b is DuelBackend {
+  return b instanceof OnlineBackend;
 }

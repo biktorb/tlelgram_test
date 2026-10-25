@@ -1,9 +1,9 @@
 import './style.css';
 import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
-import { ApiError, chooseBackend, OfflineBackend, type Backend } from './backend.ts';
+import { ApiError, chooseBackend, hasDuels, OfflineBackend, type Backend, type DuelAnswer, type DuelInfo } from './backend.ts';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
-import { haptic, initTelegram, playerName, setBack } from './telegram.ts';
+import { haptic, initTelegram, playerName, setBack, shareLink, startParam } from './telegram.ts';
 
 const app = document.getElementById('app')!;
 
@@ -13,12 +13,20 @@ let backend: Backend;
 let run: Run;
 let selection: Selection = null;
 let busy = false;
+// Challenger of the duel the current run answers.
+let duelName: string | null = null;
+// Outcome of the duel at the end of the current run.
+let duelOutcome: { result: 'win' | 'loss' | 'draw'; challengerName: string } | null = null;
+// Friends' answers to this player's duels.
+let answers: DuelAnswer[] = [];
 
-async function startNewRun(): Promise<void> {
+async function startNewRun(duel?: DuelInfo): Promise<void> {
   if (busy) return;
   busy = true;
   try {
-    run = await backend.newRun();
+    run = await backend.newRun(duel?.code);
+    duelName = duel ? duel.challengerName : null;
+    duelOutcome = null;
     selection = null;
   } catch (e) {
     showError(e);
@@ -55,7 +63,16 @@ async function fight(): Promise<void> {
   try {
     const res = await backend.fight(run);
     run = res.run;
-    playBattle(app, res.out, { player: playerName(), enemy: res.enemy, round }, render);
+    const duel = res.duel;
+    // A duel run ends with one more battle: the final team against the challenger's.
+    const next = duel
+      ? () =>
+          playBattle(app, duel.out, { player: playerName(), enemy: duel.challengerName, title: 'Дуэль' }, () => {
+            duelOutcome = { result: duel.out.result, challengerName: duel.challengerName };
+            render();
+          })
+      : render;
+    playBattle(app, res.out, { player: playerName(), enemy: res.enemy, title: `Раунд ${round}` }, next);
   } catch (e) {
     showError(e);
     await resync();
@@ -188,6 +205,7 @@ function renderShop(): void {
       'div',
       { class: 'screen shop' },
       hud(),
+      duelName ? h('div', { class: 'duel-note' }, `⚔️ Дуэль с ${duelName}: в конце забега ваш отряд сразится с отрядом соперника`) : null,
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Отряд'), h('span', { class: 'muted' }, 'фронт ← → тыл')), h('div', { class: 'row team' }, ...slots)),
       infoPanel(),
       h('section', {}, h('div', { class: 'label' }, h('span', {}, 'Лавка'), h('span', { class: 'muted' }, `боец ${RULES.buyCost}🪙`)), h('div', { class: 'row shoprow' }, ...(shopCards.length ? shopCards : [h('div', { class: 'empty muted' }, 'Лавка пуста. Обновите её или идите в бой.')]))),
@@ -215,6 +233,13 @@ function renderOver(): void {
   const s = run.s;
   const won = s.wins >= RULES.winsToFinish;
   const pips = s.history.map((r) => (r === 'win' ? '🟩' : r === 'loss' ? '🟥' : '⬜')).join('');
+  const duelLine = duelOutcome
+    ? h(
+        'p',
+        { class: `duel-result ${duelOutcome.result}` },
+        `Дуэль с ${duelOutcome.challengerName}: ${duelOutcome.result === 'win' ? 'победа!' : duelOutcome.result === 'loss' ? 'поражение' : 'ничья'}`,
+      )
+    : null;
   app.replaceChildren(
     h(
       'div',
@@ -223,10 +248,94 @@ function renderOver(): void {
       h('p', { class: 'big' }, `${s.wins} ${plural(s.wins, 'победа', 'победы', 'побед')} за ${s.history.length} ${plural(s.history.length, 'раунд', 'раунда', 'раундов')}`),
       h('p', { class: 'pips', 'aria-label': 'История боёв' }, pips),
       h('div', { class: 'row team' }, ...s.team.map((u) => card(u))),
-      h('button', { class: 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
-      h('p', { class: 'muted small' }, 'В Telegram-версии здесь будет кнопка «Побей мой отряд».'),
+      duelLine,
+      hasDuels(backend) ? h('button', { class: 'primary', type: 'button', onclick: () => void shareRun() }, '⚔️ Побей мой отряд') : null,
+      h('button', { class: hasDuels(backend) ? 'ghost' : 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
+      answersList(),
     ),
   );
+}
+
+// Sends friends a link: they play from the same seed and fight this team at the end.
+async function shareRun(): Promise<void> {
+  if (busy || !hasDuels(backend)) return;
+  busy = true;
+  try {
+    const { link } = await backend.share();
+    if (!link) {
+      toast('Ссылка на игру ещё не настроена на сервере');
+      return;
+    }
+    const wins = run.s.wins;
+    const boast = wins > 0 ? `Я набрал ${wins} ${plural(wins, 'победу', 'победы', 'побед')} в «Отряде»` : 'Я собрал отряд в «Отряде»';
+    shareLink(link, `${boast} 🐱⚔️ Сможешь победить моих котов?`);
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy = false;
+  }
+}
+
+function answersList(): HTMLElement | null {
+  if (answers.length === 0) return null;
+  const line = (a: DuelAnswer) => {
+    // a.result is the friend's result, so a friend's loss is the player's win.
+    const text = a.result === 'loss' ? 'ваш отряд победил' : a.result === 'win' ? 'ваш отряд проиграл' : 'ничья';
+    return h('li', { class: a.isNew ? 'new' : '' }, `${a.userName}: ${text}`);
+  };
+  return h('section', { class: 'answers' }, h('div', { class: 'label' }, h('span', {}, 'Ответы на ваши вызовы')), h('ul', {}, ...answers.slice(0, 5).map(line)));
+}
+
+// ---------- Duel invitation ----------
+
+function renderInvite(duel: DuelInfo): void {
+  setBack(null);
+  const inProgress = !run.s.finished && run.s.round > 1;
+  app.replaceChildren(
+    h(
+      'div',
+      { class: 'screen over invite' },
+      h('h1', {}, `${duel.challengerName} вызывает на дуэль!`),
+      h('p', { class: 'big' }, `Отряд соперника: ${duel.wins} ${plural(duel.wins, 'победа', 'победы', 'побед')}`),
+      h('div', { class: 'row team' }, ...duel.team.map((u) => card(u))),
+      h('p', {}, 'Пройдите забег с той же стартовой лавкой. В конце ваш отряд сразится с этим.'),
+      inProgress ? h('p', { class: 'muted small' }, 'Текущий забег будет завершён.') : null,
+      h('button', { class: 'primary', type: 'button', onclick: () => void startNewRun(duel) }, 'Принять вызов'),
+      h('button', { class: 'ghost', type: 'button', onclick: render }, 'Не сейчас'),
+    ),
+  );
+}
+
+async function loadDuels(): Promise<DuelInfo | null> {
+  if (!hasDuels(backend)) return null;
+  const b = backend;
+  const [invite] = await Promise.all([
+    (async () => {
+      const param = startParam();
+      if (!param.startsWith('d_')) return null;
+      const code = param.slice(2);
+      if (b.duel === code) return null; // already answering it
+      try {
+        const duel = await b.duelInfo(code);
+        if (!duel.mine) return duel;
+        toast('Это ваш вызов: отправьте его друзьям');
+        return null;
+      } catch (e) {
+        showError(e);
+        return null;
+      }
+    })(),
+    (async () => {
+      if (b.duel) duelName = (await b.duelInfo(b.duel).catch(() => null))?.challengerName ?? 'другом';
+    })(),
+    (async () => {
+      answers = await b.duelAnswers().catch(() => []);
+      const fresh = answers.filter((a) => a.isNew);
+      if (fresh.length === 1) toast(`${fresh[0].userName} принял ваш вызов`);
+      else if (fresh.length > 1) toast(`Новых ответов на ваши вызовы: ${fresh.length}`);
+    })(),
+  ]);
+  return invite;
 }
 
 function plural(n: number, one: string, few: string, many: string): string {
@@ -254,7 +363,9 @@ async function boot(): Promise<void> {
     backend = new OfflineBackend();
     run = await backend.load();
   }
-  render();
+  const invite = await loadDuels();
+  if (invite) renderInvite(invite);
+  else render();
 }
 
 void boot();

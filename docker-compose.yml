@@ -25,6 +25,8 @@ services:
       DATABASE_URL: postgres://otryad:${POSTGRES_PASSWORD:-otryad}@db:5432/otryad
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://biktorb.github.io}
+      # The Mini App's link, used in duel invitations and bot messages.
+      TELEGRAM_APP_LINK: ${TELEGRAM_APP_LINK:-https://t.me/squad_play_bot/Squad}
     restart: unless-stopped
 
   # Gets a Let's Encrypt certificate for DOMAIN and proxies to the server.
