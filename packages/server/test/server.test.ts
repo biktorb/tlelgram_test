@@ -4,7 +4,7 @@ import { ActionError, Rng, Run, type Action, type RunState } from '@otryad/core'
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
 import type { Config } from '../src/config.ts';
-import { seedGhosts, type Notifier } from '../src/game.ts';
+import { dailySeed, dayOf, leagueMove, seedGhosts, weekOf, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
 
@@ -67,6 +67,25 @@ describe('initData validation', () => {
   });
 });
 
+describe('leagues', () => {
+  test('weeks start on Monday, Moscow time', () => {
+    assert.equal(weekOf(Date.parse('2030-01-07T00:30:00+03:00')), '2030-01-07');
+    assert.equal(weekOf(Date.parse('2030-01-13T23:30:00+03:00')), '2030-01-07');
+    assert.equal(weekOf(Date.parse('2030-01-13T21:30:00Z')), '2030-01-14', 'Monday 00:30 in Moscow');
+  });
+
+  test('the top fifth with points goes up, the bottom fifth down', () => {
+    assert.equal(leagueMove(0, 1, 1, 5), 1, 'a lone player with points goes up');
+    assert.equal(leagueMove(0, 1, 1, 0), 0, 'no points, no promotion');
+    assert.equal(leagueMove(3, 1, 10, 30), 0, 'diamond is the top');
+    assert.equal(leagueMove(1, 2, 10, 20), 1);
+    assert.equal(leagueMove(1, 3, 10, 20), 0);
+    assert.equal(leagueMove(1, 9, 10, 2), -1);
+    assert.equal(leagueMove(1, 4, 4, 0), 0, 'small leagues demote nobody');
+    assert.equal(leagueMove(0, 10, 10, 0), 0, 'bronze is the bottom');
+  });
+});
+
 // The same API scenarios run against every available store.
 const stores: [string, () => Promise<Store>][] = [['memory', async () => new MemoryStore()]];
 if (process.env.TEST_DATABASE_URL) {
@@ -95,10 +114,12 @@ for (const [name, makeStore] of stores) {
       duelAnswered: (duel, friend, result) => notified.push({ challengerId: duel.challengerId, friend, result }),
     };
 
+    let clock = Date.now();
+
     before(async () => {
       store = await makeStore();
       await seedGhosts(store, BOT_TEAMS);
-      app = await buildApp(config, store, { notifier });
+      app = await buildApp(config, store, { notifier, now: () => clock });
     });
 
     // Plays a run to the end buying the first shop unit each turn; returns the last turn's body.
@@ -322,6 +343,85 @@ for (const [name, makeStore] of stores) {
       assert.equal(top.find((e: { name: string }) => e.name === 'P70').me, true);
       assert.equal(top.find((e: { name: string }) => e.name === 'P71').me, false);
       assert.equal(top[0].userId, undefined, 'player ids are not exposed');
+    });
+
+    test('daily challenge: same seed for everyone, one attempt, ranked', async () => {
+      const date = dayOf(clock);
+      const daily = async (id: number) => (await app.inject({ method: 'GET', url: '/api/daily', headers: auth(id) })).json().daily;
+      const startDaily = (id: number) => app.inject({ method: 'POST', url: '/api/runs', headers: auth(id), payload: { daily: true } });
+
+      assert.deepEqual(await daily(90), { date, status: 'none', top: [], rank: null });
+      const a = (await startDaily(90)).json().run;
+      assert.equal(a.daily, date);
+      assert.equal(a.state.seed, dailySeed(date));
+      assert.equal((await startDaily(90)).json().run.id, a.id, 'an unfinished daily run is resumed');
+      assert.equal((await daily(90)).status, 'active');
+
+      const b = (await startDaily(91)).json().run;
+      assert.deepEqual(b.state.shop, a.state.shop, 'everyone gets the same first shop');
+
+      const aEnd = (await playToEnd(90, a)).run.state;
+      const again = await startDaily(90);
+      assert.equal(again.statusCode, 409, 'one attempt per day');
+      const bEnd = (await playToEnd(91, b)).run.state;
+
+      const aBetter = aEnd.wins > bEnd.wins || (aEnd.wins === bEnd.wins && aEnd.lives >= bEnd.lives);
+      const da = await daily(90);
+      assert.equal(da.status, 'finished');
+      assert.equal(da.rank, aBetter ? 1 : 2);
+      assert.equal((await daily(91)).rank, aBetter ? 2 : 1);
+      assert.deepEqual(da.top.map((e: { name: string }) => e.name), aBetter ? ['P90', 'P91'] : ['P91', 'P90']);
+      assert.equal(da.top.find((e: { name: string }) => e.name === 'P90').me, true);
+
+      clock += 24 * 3600 * 1000;
+      const next = await daily(90);
+      assert.equal(next.status, 'none', 'a new day brings a new attempt');
+      assert.notEqual(dailySeed(next.date), dailySeed(date));
+      clock -= 24 * 3600 * 1000;
+    });
+
+    test('weekly league: first runs of a day earn points, the week settles', async () => {
+      const saved = clock;
+      clock = Date.parse('2030-01-08T12:00:00+03:00');
+      const league = async (id: number) => (await app.inject({ method: 'GET', url: '/api/league', headers: auth(id) })).json().league;
+      const play = async (id: number) => (await playToEnd(id, (await app.inject({ method: 'POST', url: '/api/runs', headers: auth(id) })).json().run)).run.state.wins as number;
+
+      const fresh = await league(100);
+      assert.equal(fresh.week, '2030-01-07');
+      assert.equal(fresh.endsAt, '2030-01-13T21:00:00.000Z');
+      assert.deepEqual([fresh.league, fresh.points, fresh.rank, fresh.size, fresh.runsToday], [0, 0, null, 0, 0]);
+
+      const wins = [await play(100), await play(100), await play(100), await play(100)];
+      const a = await league(100);
+      assert.equal(a.points, wins[0] + wins[1] + wins[2], 'only three runs a day count');
+      assert.equal(a.runsToday, 3);
+      clock += 24 * 3600 * 1000;
+      assert.equal((await league(100)).runsToday, 0, 'a new day counts again');
+      const extra = await play(100);
+      assert.equal((await league(100)).points, a.points + extra);
+
+      const bWins = await play(101);
+      const aPoints = a.points + extra;
+      const b = await league(101);
+      assert.equal(b.size, 2);
+      const aFirst = aPoints >= bWins;
+      assert.equal(b.rank, aFirst ? 2 : 1);
+      assert.deepEqual(b.top.map((e: { name: string }) => e.name), aFirst ? ['P100', 'P101'] : ['P101', 'P100']);
+      assert.equal(b.up, 1);
+      assert.equal(b.down, 0, 'bronze has no way down');
+
+      clock += 7 * 24 * 3600 * 1000;
+      const next = await league(aFirst ? 100 : 101);
+      const winnerPoints = aFirst ? aPoints : bWins;
+      assert.equal(next.week, '2030-01-14');
+      assert.equal(next.league, winnerPoints > 0 ? 1 : 0, 'the leader goes up');
+      assert.equal(next.moved, winnerPoints > 0 ? 1 : 0);
+      assert.equal(next.points, 0);
+      const other = await league(aFirst ? 101 : 100);
+      assert.deepEqual([other.league, other.moved], [0, 0]);
+      await play(aFirst ? 100 : 101);
+      assert.equal((await league(aFirst ? 100 : 101)).league, next.league, 'the placement sticks once the player plays');
+      clock = saved;
     });
 
     test('ordinary runs have no duel battle', async () => {
