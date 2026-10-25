@@ -61,23 +61,25 @@ VITE_API_URL=http://localhost:3000 npm run dev
 
 ## Развёртывание на VPS
 
-Нужен VPS с Docker (1 ГБ памяти хватит на старт) и домен: Telegram открывает Mini App только по HTTPS.
+Нужен VPS с Ubuntu или Debian (хватит 1 vCPU и 1 ГБ памяти) и открытые порты 80 и 443. Свой домен не обязателен: по умолчанию игра получает адрес `IP-сервера.sslip.io` (например `203-0-113-7.sslip.io`), и Caddy сам выпускает для него HTTPS-сертификат.
 
-1. Склонировать репозиторий на сервер и создать рядом `.env`:
+1. Зайти на сервер по SSH и выполнить:
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/biktorb/tlelgram_test/main/deploy/install.sh | sudo bash
    ```
-   TELEGRAM_BOT_TOKEN=…
-   POSTGRES_PASSWORD=длинный-случайный-пароль
-   ```
-2. `docker compose up -d --build` поднимет PostgreSQL и сервер на порту 3000. Миграции базы и стартовые отряды-боты применятся сами.
-3. HTTPS проще всего получить через Caddy: он сам выпускает сертификат. Пример `Caddyfile`:
-   ```
-   game.example.com {
-     reverse_proxy localhost:3000
-   }
-   ```
-4. В @BotFather через `/myapps` поменять адрес Mini App на `https://game.example.com/`. Сервер отдаёт и игру, и API с одного адреса, поэтому CORS не нужен.
+   Скрипт ставит Docker, добавляет 2 ГБ подкачки (сборке не хватает 1 ГБ памяти) и скачивает код в `/opt/otryad`. Затем он спрашивает домен и токен бота: токен вводится скрыто и сохраняется только в `/opt/otryad/.env`. После этого скрипт запускает PostgreSQL, сервер и Caddy и сам проверяет, что игра отвечает по HTTPS.
+2. В @BotFather: `/myapps` → приложение → Edit Web App URL → адрес, который напечатал скрипт. Сервер отдаёт и игру, и API с одного адреса.
+3. Обновление до новой версии: та же команда ещё раз.
 
-Вариант без переноса клиента: оставить игру на GitHub Pages, задать в репозитории переменную `API_URL` (Settings → Secrets and variables → Actions → Variables) с адресом сервера и перезапустить «Deploy prototype». Тогда серверу нужен `CORS_ORIGIN=https://biktorb.github.io`.
+Полезное на сервере:
+```sh
+cd /opt/otryad
+docker compose ps                  # что запущено
+docker compose logs --tail 50 server
+docker compose exec db pg_dump -U otryad otryad > backup.sql   # резервная копия базы
+```
+
+Вариант без переноса клиента: оставить игру на GitHub Pages, задать в репозитории переменную `API_URL` (Settings → Secrets and variables → Actions → Variables) с адресом сервера и перезапустить «Deploy prototype». Сервер по умолчанию разрешает запросы с `https://biktorb.github.io`.
 
 ## Проверено (25.10.2026)
 
@@ -86,5 +88,6 @@ VITE_API_URL=http://localhost:3000 npm run dev
 - 200 игроков одновременно по 5 ходов: 1200 запросов за 1,8 с, p95 460 мс, ошибок нет.
 - Забеги переживают перезапуск сервера.
 - Docker-образ собирается, применяет миграции, засевает 746 отрядов-ботов и отдаёт игру.
+- Связка из `docker-compose.yml` (PostgreSQL, сервер, Caddy) запущена целиком: игра и API отвечают по HTTPS, HTTP перенаправляется на HTTPS.
 
 Известное ограничение: состояние генератора случайных чисел лавки есть у клиента, поэтому теоретически можно заранее узнать, что выпадет при обновлении лавки. Бой при этом считается только на сервере. Если это станет проблемой, обновление лавки можно перенести на сервер.
