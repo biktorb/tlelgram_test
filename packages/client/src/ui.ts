@@ -1,5 +1,5 @@
 import { def, levelOf } from '@otryad/core';
-import { icon } from './art.ts';
+import { art } from './art.ts';
 
 type Attrs = Record<string, string | number | boolean | ((e: Event) => void) | undefined>;
 
@@ -27,10 +27,12 @@ export function card(u: CardData, extraClass = ''): HTMLElement {
   const d = def(u.id);
   const xp = u.xp ?? 0;
   const level = levelOf(xp);
+  const a = art(u.id);
   return h(
     'div',
     { class: `card tier${d.tier} ${u.frozen ? 'frozen' : ''} ${extraClass}`.trim() },
-    h('div', { class: 'ico', 'aria-hidden': 'true' }, icon(u.id)),
+    h('div', { class: 'ico', 'aria-hidden': 'true' }, a.face),
+    a.prop ? h('div', { class: 'prop', 'aria-hidden': 'true' }, a.prop) : null,
     h('div', { class: 'lvl', title: `Уровень ${level}` }, levelPips(xp)),
     h(
       'div',

@@ -2,6 +2,7 @@ import './style.css';
 import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action, type RunState, type Unit } from '@otryad/core';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
+import { haptic, initTelegram, playerName, setBack } from './telegram.ts';
 import ghostData from './ghosts.json';
 
 type GhostTeam = Omit<Unit, 'uid'>[];
@@ -48,10 +49,14 @@ function startNewRun(): void {
 function act(action: Action): void {
   try {
     run.apply(action);
+    haptic.tap();
     selection = null;
     save();
   } catch (e) {
-    if (e instanceof ActionError) toast(e.message);
+    if (e instanceof ActionError) {
+      haptic.result('error');
+      toast(e.message);
+    }
     else throw e;
   }
   render();
@@ -77,12 +82,13 @@ function fight(): void {
   const out = run.fight(ghost, newSeed());
   selection = null;
   save();
-  playBattle(app, out, { player: 'Ваш отряд', enemy, round }, render);
+  playBattle(app, out, { player: playerName(), enemy, round }, render);
 }
 
 // ---------- Shop screen ----------
 
 function onShop(i: number): void {
+  haptic.tap();
   selection = selection?.kind === 'shop' && selection.i === i ? null : { kind: 'shop', i };
   render();
 }
@@ -108,6 +114,7 @@ function onTeam(i: number): void {
     return act({ a: 'move', from, to: i });
   }
   if (target) {
+    haptic.tap();
     selection = { kind: 'team', i };
     render();
   }
@@ -131,6 +138,14 @@ function infoPanel(): HTMLElement {
 }
 
 function renderShop(): void {
+  setBack(
+    selection
+      ? () => {
+          selection = null;
+          render();
+        }
+      : null,
+  );
   const s = run.s;
   const sel = selection;
   const shopSel = sel?.kind === 'shop' ? s.shop[sel.i] : null;
@@ -201,6 +216,7 @@ function hud(): HTMLElement {
 // ---------- Run over ----------
 
 function renderOver(): void {
+  setBack(null);
   const s = run.s;
   const won = s.wins >= RULES.winsToFinish;
   const pips = s.history.map((r) => (r === 'win' ? '🟩' : r === 'loss' ? '🟥' : '⬜')).join('');
@@ -231,5 +247,6 @@ function render(): void {
   else renderShop();
 }
 
+initTelegram();
 run = load() ?? new Run(newSeed());
 render();

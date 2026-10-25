@@ -1,5 +1,6 @@
 import type { BattleOutcome, Unit } from '@otryad/core';
 import { card, float, h, reducedMotion, setStats } from './ui.ts';
+import { haptic, setBack } from './telegram.ts';
 
 export interface BattleNames {
   player: string;
@@ -41,7 +42,9 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
     speed = speed === 1 ? 2 : 1;
     speedBtn.textContent = `x${speed}`;
   });
-  const skipBtn = h('button', { class: 'ghost', type: 'button', onclick: () => (skipped = true) }, 'Пропустить');
+  const skip = () => (skipped = true);
+  const skipBtn = h('button', { class: 'ghost', type: 'button', onclick: skip }, 'Пропустить');
+  setBack(skip);
 
   root.replaceChildren(
     h(
@@ -66,6 +69,8 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
         rows[side].replaceChildren(...survivors.map((u) => card(u)));
       }
     }
+    setBack(onDone);
+    haptic.result(out.result === 'win' ? 'success' : out.result === 'loss' ? 'error' : 'warning');
     const text = out.result === 'win' ? 'Победа' : out.result === 'loss' ? 'Поражение' : 'Ничья';
     root.querySelector('.screen')!.append(
       h(
@@ -118,6 +123,7 @@ export function playBattle(root: HTMLElement, out: BattleOutcome, names: BattleN
           const b = units.get(e.right);
           if (a) anim(a.el, [{ transform: 'translateY(0)' }, { transform: 'translateY(-22px)' }, { transform: 'translateY(0)' }], BASE_MS.attack);
           if (b) anim(b.el, [{ transform: 'translateY(0)' }, { transform: 'translateY(22px)' }, { transform: 'translateY(0)' }], BASE_MS.attack);
+          if (!skipped) haptic.hit();
           await wait(BASE_MS.attack * 0.6);
           break;
         }
