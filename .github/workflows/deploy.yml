@@ -1,0 +1,38 @@
+name: Deploy server
+# After CI passes on main, updates the VPS over SSH.
+# Setup: run deploy/enable-autodeploy.sh on the server once (see docs/server.md).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    env:
+      KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      HOST: ${{ vars.DEPLOY_HOST }}
+    steps:
+      - name: Check setup
+        id: setup
+        run: |
+          if [ -z "$KEY" ] || [ -z "$HOST" ]; then
+            echo "::notice::DEPLOY_SSH_KEY or DEPLOY_HOST is not set, skipping deploy"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update server
+        if: steps.setup.outputs.ready == 'true'
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # The key is bound to deploy/update.sh on the server, so no command is passed.
+          ssh -T -o ServerAliveInterval=30 "root@$HOST"
