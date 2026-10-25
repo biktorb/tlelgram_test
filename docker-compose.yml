@@ -1,0 +1,45 @@
+# Single-server deployment: PostgreSQL + game server + Caddy (HTTPS).
+# Settings come from .env next to this file (deploy/install.sh writes it):
+#   TELEGRAM_BOT_TOKEN, POSTGRES_PASSWORD, DOMAIN
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: otryad
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-otryad}
+      POSTGRES_DB: otryad
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otryad"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://otryad:${POSTGRES_PASSWORD:-otryad}@db:5432/otryad
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://biktorb.github.io}
+    restart: unless-stopped
+
+  # Gets a Let's Encrypt certificate for DOMAIN and proxies to the server.
+  caddy:
+    image: caddy:2-alpine
+    command: caddy reverse-proxy --from ${DOMAIN:-localhost} --to server:3000
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:

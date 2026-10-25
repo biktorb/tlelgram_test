@@ -4,12 +4,14 @@
 
 - Игровой дизайн: [docs/design.md](docs/design.md)
 - План разработки: [docs/PLAN.md](docs/PLAN.md)
+- Сервер, API и развёртывание: [docs/server.md](docs/server.md)
 
 ## Структура
 
 - `packages/core` — правила игры: бой, лавка, бойцы. Один код для клиента и сервера.
-- `packages/client` — прототип игры в браузере (Vite).
-- `tools/balance.ts` — симуляция баланса ботами, `tools/ghosts.ts` — набор отрядов-соперников для прототипа.
+- `packages/client` — игра (Vite), работает в Telegram и в браузере, онлайн и офлайн.
+- `packages/server` — сервер: вход через Telegram, забеги, бои, соперники (Fastify + PostgreSQL).
+- `tools/balance.ts` — симуляция баланса ботами, `tools/ghosts.ts` — стартовые отряды-боты, `tools/load.ts` — нагрузочная проверка сервера.
 
 ## Команды
 

@@ -1,0 +1,20 @@
+{
+  "name": "@otryad/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "dev": "node --watch src/main.ts"
+  },
+  "dependencies": {
+    "@otryad/core": "*",
+    "@fastify/cors": "9.0.1",
+    "@fastify/rate-limit": "9.1.0",
+    "@fastify/static": "7.0.4",
+    "fastify": "4.28.1",
+    "pg": "8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.11.10"
+  }
+}

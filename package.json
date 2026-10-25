@@ -4,7 +4,7 @@
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
-    "test": "node --test packages/*/test/*.test.ts",
+    "test": "node --test packages/core/test/*.test.ts packages/server/test/*.test.ts",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p packages/client",
     "dev": "npm run dev -w @otryad/client",
     "build": "npm run build -w @otryad/client",

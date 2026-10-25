@@ -1,88 +1,83 @@
 import './style.css';
-import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action, type RunState, type Unit } from '@otryad/core';
+import { ActionError, def, levelOf, MAX_TEAM, RULES, Run, type Action } from '@otryad/core';
+import { ApiError, chooseBackend, OfflineBackend, type Backend } from './backend.ts';
 import { playBattle } from './battleView.ts';
 import { card, h, levelPips, toast } from './ui.ts';
 import { haptic, initTelegram, playerName, setBack } from './telegram.ts';
-import ghostData from './ghosts.json';
 
-type GhostTeam = Omit<Unit, 'uid'>[];
-const GHOSTS = ghostData as unknown as Record<string, GhostTeam[]>;
-
-const STORE_KEY = 'otryad.run.v1';
 const app = document.getElementById('app')!;
 
 type Selection = { kind: 'shop'; i: number } | { kind: 'team'; i: number } | null;
 
+let backend: Backend;
 let run: Run;
 let selection: Selection = null;
+let busy = false;
 
-function newSeed(): number {
-  return Math.floor(Math.random() * 2 ** 31);
-}
-
-function save(): void {
+async function startNewRun(): Promise<void> {
+  if (busy) return;
+  busy = true;
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(run.snapshot()));
-  } catch {
-    // Storage can be unavailable (private mode); the run just won't survive a reload.
+    run = await backend.newRun();
+    selection = null;
+  } catch (e) {
+    showError(e);
+  } finally {
+    busy = false;
   }
-}
-
-function load(): Run | null {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return null;
-    const state = JSON.parse(raw) as RunState;
-    return new Run(state.seed, state);
-  } catch {
-    return null;
-  }
-}
-
-function startNewRun(): void {
-  run = new Run(newSeed());
-  selection = null;
-  save();
   render();
 }
 
 function act(action: Action): void {
   try {
     run.apply(action);
+    backend.record(run, action);
     haptic.tap();
     selection = null;
-    save();
   } catch (e) {
     if (e instanceof ActionError) {
       haptic.result('error');
       toast(e.message);
-    }
-    else throw e;
+    } else throw e;
   }
   render();
 }
 
-function pickGhost(round: number): GhostTeam {
-  for (let r = Math.min(round, 20); r >= 1; r--) {
-    const list = GHOSTS[r];
-    if (list && list.length > 0) return list[Math.floor(Math.random() * list.length)];
-  }
-  return [];
-}
-
-function fight(): void {
+async function fight(): Promise<void> {
+  if (busy) return;
   if (run.s.team.length === 0) {
     toast('Купите хотя бы одного бойца');
     return;
   }
+  busy = true;
   const round = run.s.round;
-  run.endTurn();
-  const ghost = pickGhost(round).map((u, i) => ({ ...u, uid: i + 1 }));
-  const enemy = `Игрок #${1000 + Math.floor(Math.random() * 9000)}`;
-  const out = run.fight(ghost, newSeed());
   selection = null;
-  save();
-  playBattle(app, out, { player: playerName(), enemy, round }, render);
+  try {
+    const res = await backend.fight(run);
+    run = res.run;
+    playBattle(app, res.out, { player: playerName(), enemy: res.enemy, round }, render);
+  } catch (e) {
+    showError(e);
+    await resync();
+    render();
+  } finally {
+    busy = false;
+  }
+}
+
+// After a rejected turn the server's state wins.
+async function resync(): Promise<void> {
+  try {
+    run = await backend.load();
+  } catch (e) {
+    showError(e);
+  }
+}
+
+function showError(e: unknown): void {
+  haptic.result('error');
+  toast(e instanceof ApiError ? e.message : 'Что-то пошло не так');
+  if (!(e instanceof ApiError)) console.error(e);
 }
 
 // ---------- Shop screen ----------
@@ -186,7 +181,7 @@ function renderShop(): void {
     const refund = levelOf(s.team[sel.i].xp);
     actions.push(h('button', { class: 'ghost danger', type: 'button', onclick: () => act({ a: 'sell', team: sel.i }) }, `Продать · +${refund}🪙`));
   }
-  actions.push(h('button', { class: 'primary', type: 'button', onclick: fight }, 'В бой'));
+  actions.push(h('button', { class: 'primary', type: 'button', onclick: () => void fight() }, 'В бой'));
 
   app.replaceChildren(
     h(
@@ -228,7 +223,7 @@ function renderOver(): void {
       h('p', { class: 'big' }, `${s.wins} ${plural(s.wins, 'победа', 'победы', 'побед')} за ${s.history.length} ${plural(s.history.length, 'раунд', 'раунда', 'раундов')}`),
       h('p', { class: 'pips', 'aria-label': 'История боёв' }, pips),
       h('div', { class: 'row team' }, ...s.team.map((u) => card(u))),
-      h('button', { class: 'primary', type: 'button', onclick: startNewRun }, 'Новый забег'),
+      h('button', { class: 'primary', type: 'button', onclick: () => void startNewRun() }, 'Новый забег'),
       h('p', { class: 'muted small' }, 'В Telegram-версии здесь будет кнопка «Побей мой отряд».'),
     ),
   );
@@ -247,6 +242,19 @@ function render(): void {
   else renderShop();
 }
 
-initTelegram();
-run = load() ?? new Run(newSeed());
-render();
+async function boot(): Promise<void> {
+  initTelegram();
+  app.replaceChildren(h('div', { class: 'screen loading' }, h('p', { class: 'muted' }, 'Загрузка…')));
+  backend = chooseBackend();
+  try {
+    run = await backend.load();
+  } catch (e) {
+    // Server unreachable or sign-in refused: keep the game playable offline.
+    toast(e instanceof ApiError ? `${e.message}. Играем офлайн.` : 'Играем офлайн.');
+    backend = new OfflineBackend();
+    run = await backend.load();
+  }
+  render();
+}
+
+void boot();
