@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { ActionError, battle, hashSeed, Run, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
-import { DailyTakenError, type Duel, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
+import { DailyTakenError, type Duel, type LeagueEntry, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
 
 export const MAX_ACTIONS_PER_TURN = 200;
 
@@ -29,8 +29,44 @@ export interface DailyInfo {
 
 // Days change at midnight Moscow time, when most players are.
 const DAY_OFFSET_MS = 3 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
 export const dayOf = (now: number) => new Date(now + DAY_OFFSET_MS).toISOString().slice(0, 10);
 export const dailySeed = (date: string) => hashSeed(`daily:${date}`);
+// Weeks start on Monday; a week is named by its Monday.
+export const weekOf = (now: number) => {
+  const d = new Date(now + DAY_OFFSET_MS);
+  return dayOf(now - ((d.getUTCDay() + 6) % 7) * DAY_MS);
+};
+
+export const LEAGUE_COUNT = 4; // bronze, silver, gold, diamond
+export const LEAGUE_RUNS_PER_DAY = 3; // only the first runs of a day earn points
+const LEAGUE_ZONE = 0.2; // share of a league that moves up or down each week
+const MIN_LEAGUE_TO_DEMOTE = 5; // nobody drops out of a league smaller than this
+
+const zoneSize = (size: number) => Math.max(1, Math.floor(size * LEAGUE_ZONE));
+
+// Where a player goes after a week: the top fifth with points goes up, the bottom fifth down.
+export function leagueMove(league: number, rank: number, size: number, points: number): -1 | 0 | 1 {
+  const zone = zoneSize(size);
+  if (rank <= zone && points > 0 && league < LEAGUE_COUNT - 1) return 1;
+  if (size >= MIN_LEAGUE_TO_DEMOTE && rank > size - zone && league > 0) return -1;
+  return 0;
+}
+
+export interface LeagueInfo {
+  week: string;
+  endsAt: string; // ISO time of the next week's start
+  league: number;
+  moved: number; // -1, 0 or 1 against the last week played
+  points: number;
+  runsToday: number; // runs counted today, out of runsPerDay
+  runsPerDay: number;
+  rank: number | null; // null until the player finishes a run this week
+  size: number;
+  up: number; // places that move up at the end of the week
+  down: number; // places that move down
+  top: { name: string; points: number; me: boolean }[];
+}
 
 type BattleView = Pick<BattleOutcome, 'result' | 'start' | 'events' | 'left' | 'right'>;
 
@@ -103,6 +139,50 @@ export class Game {
       top: top.map(({ userId: id, name, wins, lives }) => ({ name, wins, lives, me: id === userId })),
       rank,
     };
+  }
+
+  // The player's league this week. Last week's result is settled lazily: it is
+  // final once the week is over, so it can be computed when first needed.
+  private async placement(userId: number, week: string): Promise<Pick<LeagueEntry, 'league' | 'moved'>> {
+    const entry = await this.store.leagueEntry(userId, week);
+    if (entry) return entry;
+    const last = await this.store.lastLeagueEntry(userId, week);
+    if (!last) return { league: 0, moved: 0 };
+    const { rank, size } = await this.store.leagueStanding(userId, last.week, last.league);
+    const moved = leagueMove(last.league, rank ?? size, size, last.points);
+    return { league: last.league + moved, moved };
+  }
+
+  async league(userId: number): Promise<LeagueInfo> {
+    const now = this.now();
+    const week = weekOf(now);
+    const [entry, { league, moved }] = await Promise.all([this.store.leagueEntry(userId, week), this.placement(userId, week)]);
+    const [{ rank, size }, top] = await Promise.all([
+      this.store.leagueStanding(userId, week, league),
+      this.store.leagueTop(week, league, 10),
+    ]);
+    const zone = zoneSize(size);
+    return {
+      week,
+      endsAt: new Date(Date.parse(week) + 7 * DAY_MS - DAY_OFFSET_MS).toISOString(),
+      league,
+      moved,
+      points: entry?.points ?? 0,
+      runsToday: entry?.day === dayOf(now) ? entry.dayRuns : 0,
+      runsPerDay: LEAGUE_RUNS_PER_DAY,
+      rank,
+      size,
+      up: league < LEAGUE_COUNT - 1 ? zone : 0,
+      down: league > 0 && size >= MIN_LEAGUE_TO_DEMOTE ? zone : 0,
+      top: top.map(({ userId: id, name, points }) => ({ name, points, me: id === userId })),
+    };
+  }
+
+  private async countLeagueRun(userId: number, wins: number): Promise<void> {
+    const now = this.now();
+    const week = weekOf(now);
+    const place = await this.placement(userId, week);
+    await this.store.addLeagueRun({ userId, week, ...place }, dayOf(now), wins, LEAGUE_RUNS_PER_DAY);
   }
 
   async current(userId: number): Promise<RunView | null> {
@@ -192,6 +272,7 @@ export class Game {
       battle: battleView(out),
       enemy: { name: ghost?.name ?? 'Пустая арена' },
     };
+    if (run.s.finished) await this.countLeagueRun(userId, run.s.wins);
     if (run.s.finished && stored.duelCode) {
       result.duel = await this.finishDuel(stored, userId, playerName, run.s.wins, team.map(stripUid));
     }

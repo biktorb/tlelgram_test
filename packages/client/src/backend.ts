@@ -24,6 +24,21 @@ export interface DailyInfo {
   rank: number | null;
 }
 
+export interface LeagueInfo {
+  week: string;
+  endsAt: string;
+  league: number; // 0 bronze .. 3 diamond
+  moved: number; // -1, 0 or 1 against the last week played
+  points: number;
+  runsToday: number;
+  runsPerDay: number;
+  rank: number | null;
+  size: number;
+  up: number; // places that move up at the end of the week
+  down: number;
+  top: { name: string; points: number; me: boolean }[];
+}
+
 export interface ChatEntry {
   name: string;
   bestWins: number;
@@ -62,6 +77,7 @@ export interface DuelBackend extends Backend {
   // The week's leaderboard of the chat the game was opened from; null outside a chat.
   chatTop(): Promise<ChatEntry[] | null>;
   dailyInfo(): Promise<DailyInfo>;
+  league(): Promise<LeagueInfo>;
 }
 
 export class ApiError extends Error {
@@ -167,6 +183,10 @@ export class OnlineBackend implements DuelBackend {
   async newRun(opts: { duel?: string; daily?: boolean } = {}): Promise<Run> {
     const { run } = await this.call<{ run: RunView }>('POST', '/api/runs', opts);
     return this.adopt(run);
+  }
+
+  async league(): Promise<LeagueInfo> {
+    return (await this.call<{ league: LeagueInfo }>('GET', '/api/league')).league;
   }
 
   async dailyInfo(): Promise<DailyInfo> {

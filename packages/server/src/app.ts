@@ -82,6 +82,11 @@ export async function buildApp(
     return { daily: await game.daily(u.id) };
   });
 
+  app.get('/api/league', async (req) => {
+    const u = user(req);
+    return { league: await game.league(u.id) };
+  });
+
   // Leaderboard of the chat the game was opened from; null outside a chat.
   app.get('/api/chat', async (req) => {
     const u = user(req);

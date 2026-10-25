@@ -63,6 +63,22 @@ export interface DailyEntry {
 // Thrown by createRun when the player already has a run for that daily challenge.
 export class DailyTakenError extends Error {}
 
+export interface LeagueEntry {
+  userId: number;
+  week: string; // YYYY-MM-DD of the week's Monday
+  league: number; // 0 bronze .. 3 diamond
+  moved: number; // -1, 0 or 1 against the last week played
+  points: number;
+  day: string | null; // day of the last counted run
+  dayRuns: number; // runs counted on that day
+}
+
+export interface LeagueRow {
+  userId: number;
+  name: string;
+  points: number;
+}
+
 export interface ChatEntry {
   userId: number;
   name: string;
@@ -102,6 +118,16 @@ export interface Store {
   dailyTop(date: string, limit: number): Promise<DailyEntry[]>;
   // The player's place in that order, or null when their daily run is not finished.
   dailyRank(userId: number, date: string): Promise<number | null>;
+  leagueEntry(userId: number, week: string): Promise<LeagueEntry | null>;
+  // The player's entry for their most recent week before the given one.
+  lastLeagueEntry(userId: number, beforeWeek: string): Promise<LeagueEntry | null>;
+  // Creates the player's entry for the week if missing, then adds a finished
+  // run's points unless runsPerDay runs were already counted that day.
+  addLeagueRun(entry: Pick<LeagueEntry, 'userId' | 'week' | 'league' | 'moved'>, day: string, points: number, runsPerDay: number): Promise<LeagueEntry>;
+  // A league's players for the week: most points, then who got there first.
+  leagueTop(week: string, league: number, limit: number): Promise<LeagueRow[]>;
+  // The player's place in that order (null when not in it) and the number of players.
+  leagueStanding(userId: number, week: string, league: number): Promise<{ rank: number | null; size: number }>;
   // Players of runs started from this chat since the given time, best result first.
   chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]>;
   stats(userId: number): Promise<UserStats>;
@@ -124,6 +150,7 @@ export class MemoryStore implements Store {
   private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[] }[] = [];
   private duels = new Map<string, Duel>();
   private duelResults: (DuelResult & { seen: boolean })[] = [];
+  private leagues = new Map<string, LeagueEntry & { updatedAt: number }>();
   private seq = 0;
 
   async upsertUser(id: number, firstName: string, username?: string): Promise<void> {
@@ -224,6 +251,48 @@ export class MemoryStore implements Store {
     return i < 0 ? null : i + 1;
   }
 
+  async leagueEntry(userId: number, week: string): Promise<LeagueEntry | null> {
+    const e = this.leagues.get(`${userId}:${week}`);
+    return e ? toEntry(e) : null;
+  }
+
+  async lastLeagueEntry(userId: number, beforeWeek: string): Promise<LeagueEntry | null> {
+    const mine = [...this.leagues.values()].filter((e) => e.userId === userId && e.week < beforeWeek);
+    mine.sort((a, b) => (a.week < b.week ? 1 : -1));
+    return mine[0] ? toEntry(mine[0]) : null;
+  }
+
+  async addLeagueRun(entry: Pick<LeagueEntry, 'userId' | 'week' | 'league' | 'moved'>, day: string, points: number, runsPerDay: number): Promise<LeagueEntry> {
+    const key = `${entry.userId}:${entry.week}`;
+    const e = this.leagues.get(key) ?? { ...entry, points: 0, day: null, dayRuns: 0, updatedAt: ++this.seq };
+    this.leagues.set(key, e);
+    if (e.day !== day || e.dayRuns < runsPerDay) {
+      e.dayRuns = e.day === day ? e.dayRuns + 1 : 1;
+      e.day = day;
+      e.points += points;
+      if (points > 0) e.updatedAt = ++this.seq;
+    }
+    return toEntry(e);
+  }
+
+  private leagueOrder(week: string, league: number) {
+    return [...this.leagues.values()]
+      .filter((e) => e.week === week && e.league === league)
+      .sort((a, b) => b.points - a.points || a.updatedAt - b.updatedAt);
+  }
+
+  async leagueTop(week: string, league: number, limit: number): Promise<LeagueRow[]> {
+    return this.leagueOrder(week, league)
+      .slice(0, limit)
+      .map((e) => ({ userId: e.userId, name: this.users.get(e.userId)?.firstName ?? 'Игрок', points: e.points }));
+  }
+
+  async leagueStanding(userId: number, week: string, league: number): Promise<{ rank: number | null; size: number }> {
+    const order = this.leagueOrder(week, league);
+    const i = order.findIndex((e) => e.userId === userId);
+    return { rank: i < 0 ? null : i + 1, size: order.length };
+  }
+
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
     const byUser = new Map<number, ChatEntry>();
     for (const r of this.runs.values()) {
@@ -250,4 +319,8 @@ export class MemoryStore implements Store {
 
 function toStored({ id, userId, version, state, finished, duelCode, daily }: StoredRun): StoredRun {
   return structuredClone({ id, userId, version, state, finished, duelCode, daily });
+}
+
+function toEntry({ userId, week, league, moved, points, day, dayRuns }: LeagueEntry): LeagueEntry {
+  return { userId, week, league, moved, points, day, dayRuns };
 }

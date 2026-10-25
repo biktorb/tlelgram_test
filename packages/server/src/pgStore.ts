@@ -13,6 +13,8 @@ import {
   DailyTakenError,
   type Ghost,
   type GhostUnit,
+  type LeagueEntry,
+  type LeagueRow,
   type NewRunOptions,
   type Store,
   type StoredRun,
@@ -208,6 +210,61 @@ export class PgStore implements Store {
     return rows[0] ? Number(rows[0].rank) : null;
   }
 
+  async leagueEntry(userId: number, week: string): Promise<LeagueEntry | null> {
+    const { rows } = await this.pool.query(`SELECT ${LEAGUE_COLUMNS} FROM league_weeks WHERE user_id = $1 AND week = $2`, [userId, week]);
+    return rows[0] ? toEntry(rows[0]) : null;
+  }
+
+  async lastLeagueEntry(userId: number, beforeWeek: string): Promise<LeagueEntry | null> {
+    const { rows } = await this.pool.query(
+      `SELECT ${LEAGUE_COLUMNS} FROM league_weeks WHERE user_id = $1 AND week < $2 ORDER BY week DESC LIMIT 1`,
+      [userId, beforeWeek],
+    );
+    return rows[0] ? toEntry(rows[0]) : null;
+  }
+
+  async addLeagueRun(entry: Pick<LeagueEntry, 'userId' | 'week' | 'league' | 'moved'>, day: string, points: number, runsPerDay: number): Promise<LeagueEntry> {
+    const { userId, week } = entry;
+    await this.pool.query(
+      'INSERT INTO league_weeks (user_id, week, league, moved) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [userId, week, entry.league, entry.moved],
+    );
+    await this.pool.query(
+      `UPDATE league_weeks
+       SET points = points + $4,
+           day_runs = CASE WHEN day = $3 THEN day_runs + 1 ELSE 1 END,
+           day = $3,
+           updated_at = CASE WHEN $4 > 0 THEN now() ELSE updated_at END
+       WHERE user_id = $1 AND week = $2 AND (day IS DISTINCT FROM $3 OR day_runs < $5)`,
+      [userId, week, day, points, runsPerDay],
+    );
+    return (await this.leagueEntry(userId, week))!;
+  }
+
+  async leagueTop(week: string, league: number, limit: number): Promise<LeagueRow[]> {
+    const { rows } = await this.pool.query<{ user_id: string; name: string; points: number }>(
+      `SELECT l.user_id, u.first_name AS name, l.points
+       FROM league_weeks l JOIN users u ON u.id = l.user_id
+       WHERE l.week = $1 AND l.league = $2
+       ORDER BY l.points DESC, l.updated_at ASC LIMIT $3`,
+      [week, league, limit],
+    );
+    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, points: r.points }));
+  }
+
+  async leagueStanding(userId: number, week: string, league: number): Promise<{ rank: number | null; size: number }> {
+    const { rows } = await this.pool.query<{ size: string; rank: string | null }>(
+      `WITH me AS (SELECT points, updated_at FROM league_weeks WHERE user_id = $1 AND week = $2 AND league = $3)
+       SELECT (SELECT count(*) FROM league_weeks WHERE week = $2 AND league = $3) AS size,
+              (SELECT 1 + count(*) FROM league_weeks l, me
+               WHERE l.week = $2 AND l.league = $3 AND l.user_id <> $1
+                 AND (l.points, me.updated_at) > (me.points, l.updated_at)
+               HAVING (SELECT count(*) FROM me) > 0) AS rank`,
+      [userId, week, league],
+    );
+    return { rank: rows[0].rank === null ? null : Number(rows[0].rank), size: Number(rows[0].size) };
+  }
+
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
     const { rows } = await this.pool.query<{ user_id: string; name: string; best: number; runs: string }>(
       `SELECT r.user_id, u.first_name AS name, max(r.wins) AS best, count(*) AS runs
@@ -232,7 +289,7 @@ export class PgStore implements Store {
 
   // Test helper: empties all game tables.
   async reset(): Promise<void> {
-    await this.pool.query('TRUNCATE duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
+    await this.pool.query('TRUNCATE league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
   }
 
   async close(): Promise<void> {
@@ -242,6 +299,7 @@ export class PgStore implements Store {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUN_COLUMNS = "id, user_id, version, state, finished, duel_code, to_char(daily, 'YYYY-MM-DD') AS daily";
+const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
 const DUEL_COLUMNS = 'code, run_id, challenger_id, challenger_name, seed, wins, team';
 
 function toRun(row: {
@@ -282,4 +340,16 @@ function toDuel(row: {
     wins: row.wins,
     team: row.team,
   };
+}
+
+function toEntry(row: {
+  user_id: string | number;
+  week: string;
+  league: number;
+  moved: number;
+  points: number;
+  day: string | null;
+  day_runs: number;
+}): LeagueEntry {
+  return { userId: Number(row.user_id), week: row.week, league: row.league, moved: row.moved, points: row.points, day: row.day, dayRuns: row.day_runs };
 }
