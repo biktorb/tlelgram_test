@@ -24,7 +24,7 @@ export async function buildApp(
     opts.notifier !== undefined
       ? opts.notifier
       : config.botToken
-        ? new TelegramNotifier(config.botToken, config.appLink, (m) => app.log.warn(m))
+        ? new TelegramNotifier(config.botToken, config.telegramApi, config.appLink, (m) => app.log.warn(m))
         : null;
   const game = new Game(store, notifier, opts.now);
   const duelLink = (code: string) => (config.appLink ? `${config.appLink}?startapp=d_${code}` : null);

@@ -12,11 +12,13 @@ const TEXT: Record<BattleResult, (friend: string) => string> = {
 // the player never opened a chat with the bot; the in-game inbox covers that case.
 export class TelegramNotifier implements Notifier {
   private token: string;
+  private apiBase: string;
   private appLink: string | null;
   private log: (msg: string) => void;
 
-  constructor(token: string, appLink: string | null, log: (msg: string) => void) {
+  constructor(token: string, apiBase: string, appLink: string | null, log: (msg: string) => void) {
     this.token = token;
+    this.apiBase = apiBase;
     this.appLink = appLink;
     this.log = log;
   }
@@ -24,7 +26,7 @@ export class TelegramNotifier implements Notifier {
   duelAnswered(duel: Duel, friendName: string, friendResult: BattleResult): void {
     const body: Record<string, unknown> = { chat_id: duel.challengerId, text: TEXT[friendResult](friendName) };
     if (this.appLink) body.reply_markup = { inline_keyboard: [[{ text: 'Играть', url: this.appLink }]] };
-    fetch(`https://api.telegram.org/bot${this.token}/sendMessage`, {
+    fetch(`${this.apiBase}/bot${this.token}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),

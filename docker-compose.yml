@@ -27,6 +27,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-https://biktorb.github.io}
       # The Mini App's link, used in duel invitations and bot messages.
       TELEGRAM_APP_LINK: ${TELEGRAM_APP_LINK:-https://t.me/squad_play_bot/Squad}
+      # A relay for the Bot API when the server's network blocks api.telegram.org (docs/server.md).
+      TELEGRAM_API_BASE: ${TELEGRAM_API_BASE:-}
     restart: unless-stopped
 
   # Gets a Let's Encrypt certificate for DOMAIN and proxies to the server.
