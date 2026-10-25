@@ -1,0 +1,16 @@
+{
+  "name": "@otryad/client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p . && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@otryad/core": "*"
+  },
+  "devDependencies": {
+    "vite": "5.4.10"
+  }
+}
