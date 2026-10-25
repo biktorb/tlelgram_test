@@ -17,6 +17,7 @@ interface WebApp {
   platform: string;
   colorScheme: 'light' | 'dark';
   themeParams: ThemeParams;
+  initData: string;
   initDataUnsafe: { user?: { first_name?: string }; start_param?: string };
   ready(): void;
   expand(): void;
@@ -81,6 +82,11 @@ export function initTelegram(): void {
   const mobile = tg.platform === 'ios' || tg.platform === 'android';
   if (mobile && tg.isVersionAtLeast('8.0')) tg.requestFullscreen?.();
   if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes?.();
+}
+
+// Signed launch data for the server; empty outside Telegram.
+export function initData(): string {
+  return inTelegram ? tg!.initData : '';
 }
 
 export function playerName(): string {

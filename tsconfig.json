@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packages/core/src", "packages/core/test", "tools"]
+  "include": ["packages/core/src", "packages/core/test", "packages/server/src", "packages/server/test", "tools"]
 }
