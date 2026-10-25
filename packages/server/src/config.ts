@@ -27,6 +27,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     console.warn('TELEGRAM_APP_LINK must look like https://t.me/<bot>/<app>; duel links are off');
     config.appLink = null;
   }
+  if (config.botToken && !/^\d+:[\w-]{30,}$/.test(config.botToken)) {
+    console.warn('TELEGRAM_BOT_TOKEN does not look like a bot token: every Telegram sign-in will be refused');
+  }
   if (!config.botToken && !config.devAuth) {
     throw new Error('TELEGRAM_BOT_TOKEN is required (or DEV_AUTH=1 for local development)');
   }
