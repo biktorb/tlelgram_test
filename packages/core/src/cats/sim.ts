@@ -2,6 +2,7 @@ import { Rng } from '../rng.ts';
 import {
   BASE_STATS,
   ENEMIES,
+  EVOLUTIONS,
   HEROES,
   PASSIVES,
   PASSIVE_IDS,
@@ -21,6 +22,7 @@ import {
   type WeaponId,
   type WeaponStats,
 } from './content.ts';
+import { RoomMap } from './map.ts';
 import { dcos, dsin, len } from './math.ts';
 
 // Fixed step: the same input on the same seed gives the same run everywhere.
@@ -31,6 +33,9 @@ export const RUN_TICKS = RUN_SECONDS * TICK_RATE;
 const MINUTE = 60 * TICK_RATE;
 export const BOSS_TICK = 18 * MINUTE;
 export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
+// Smaller elites in between, like the minute bosses of Mad Forest: a giant
+// dust bunny with a chest.
+export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 17].map((m) => m * MINUTE);
 export const MAX_ENEMIES = 300; // more than this crawls on older phones
 export const SPAWN_DISTANCE = 520; // just outside a phone screen
 export const MAX_GEMS = 250; // further gems merge into one
@@ -45,7 +50,7 @@ const SCREEN_Y = 460;
 // Difficulty knobs, tuned with `npm run balance:cats`.
 export const BALANCE = {
   hpPerMin: 0.15, // enemy health grows by this share every minute
-  hpPerMin2: 0.08, // and by this share every minute squared, to keep up with upgrades
+  hpPerMin2: 0.11, // and by this share every minute squared, to keep up with upgrades
   crowdScale: 1.3, // multiplies the fewest enemies of every minute (CROWD)
   burstEvery: 1.2, // seconds between extra spawns
   meowPush: 90, // knockback of the meow aura
@@ -149,8 +154,9 @@ export interface Gem {
 // Things on the floor, as in Vampire Survivors: food heals, catnip pulls
 // every gem, the alarm clock clears the screen, the unplugged plug stops
 // every vacuum for a while, and fish is fish.
-export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin';
-export const PICKUP_WEIGHTS: Record<PickupKind, number> = { food: 5, coin: 3, catnip: 1, plug: 1, alarm: 1 };
+// Chests come only from elites and the boss.
+export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin' | 'chest';
+export const PICKUP_WEIGHTS: Record<PickupKind, number> = { food: 5, coin: 3, catnip: 1, plug: 1, alarm: 1, chest: 0 };
 const PICKUP_CHANCE = 0.007; // per kill
 const FREEZE_TICKS = 6 * TICK_RATE;
 
@@ -174,6 +180,8 @@ export type SimEvent =
   | { t: 'wave'; x: number; y: number; r: number }
   | { t: 'spark'; x: number; y: number; r: number }
   | { t: 'pickup'; kind: PickupKind }
+  // A chest opened: evolved weapons, or items that gained a level.
+  | { t: 'chest'; evolved: WeaponId[]; items: ItemId[] }
   | { t: 'end'; won: boolean };
 
 export interface RunResult {
@@ -183,6 +191,7 @@ export interface RunResult {
   level: number;
   fish: number;
   items: Partial<Record<ItemId, number>>;
+  evolved: Partial<Record<WeaponId, boolean>>;
 }
 
 // League and season points of a finished run: one per full 30 seconds
@@ -219,6 +228,8 @@ export class CatRun {
   need = xpToNext(1);
   fish = 0;
   rerolls = 1;
+  evolved: Partial<Record<WeaponId, boolean>> = {};
+  readonly map: RoomMap;
   // Tick when every slot was full and maxed, or -1.
   fullTick = -1;
   // Owned weapons and passives in the order they were taken, with levels.
@@ -250,6 +261,7 @@ export class CatRun {
     this.rng = new Rng(this.seed);
     this.trackEvents = opts.events ?? true;
     this.hero = opts.hero ?? 'ryzhik';
+    this.map = new RoomMap(this.seed);
     this.items[HEROES[this.hero].weapon] = 1;
     this.recompute();
     this.player.hp = this.player.maxHp;
@@ -272,7 +284,7 @@ export class CatRun {
   }
 
   result(): RunResult {
-    return { won: this.won, ticks: this.tick, kills: this.kills, level: this.level, fish: this.fish, items: { ...this.items } };
+    return { won: this.won, ticks: this.tick, kills: this.kills, level: this.level, fish: this.fish, items: { ...this.items }, evolved: { ...this.evolved } };
   }
 
   // A weapon's numbers at its level, scaled by the cat's stats.
@@ -296,6 +308,16 @@ export class CatRun {
     w.area *= s.area;
     w.speed *= s.speed;
     w.duration *= s.duration;
+    if (this.evolved[id]) {
+      if (id === 'claws') {
+        w.amount = Math.max(2, w.amount);
+        w.area *= 1.3;
+        w.dmg += 10;
+      } else if (id === 'laser') w.cd = 0.2;
+      else if (id === 'fish') w.cd = 0.15;
+      else if (id === 'meow') w.area *= 1.4;
+      else if (id === 'pot') w.amount += 6;
+    }
     return w;
   }
 
@@ -313,6 +335,7 @@ export class CatRun {
     const [mx, my] = DIR_VECTORS[dir] ?? DIR_VECTORS[0];
     p.x += mx * this.stats.move * DT;
     p.y += my * this.stats.move * DT;
+    [p.x, p.y] = this.map.pushOut(p.x, p.y, p.r);
     if (mx || my) {
       p.dx = mx;
       p.dy = my;
@@ -396,6 +419,7 @@ export class CatRun {
       hitTick: -100,
       yarnTick: 0,
     };
+    [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
     if (def.move === 'charge') this.aim(en);
     this.enemies.push(en);
     return en;
@@ -441,6 +465,12 @@ export class CatRun {
       e.hp = e.maxHp = ENEMIES.bigrobot.hp * this.level; // like VS bosses: health times the cat's level
       this.emit({ t: 'elite' });
     }
+    if (MINI_ELITE_TICKS.includes(this.tick)) {
+      const e = this.spawn('dust', true);
+      e.r *= 1.8;
+      e.hp = e.maxHp = 25 * this.level;
+      e.dmg = 8;
+    }
     if (this.tick === BOSS_TICK) {
       this.spawn('mop', true);
       this.emit({ t: 'boss' });
@@ -460,8 +490,10 @@ export class CatRun {
   }
 
   // ---------- combat ----------
-  private hit(en: Enemy, dmg: number, kx: number, ky: number): void {
+  // `heal` is health the cat gets back for the hit (evolved claws and meow).
+  private hit(en: Enemy, dmg: number, kx: number, ky: number, heal = 0): void {
     if (en.dead) return;
+    if (heal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
     en.hp -= dmg;
     en.hitTick = this.tick;
     // Big enemies are heavy: knockback shrinks with size.
@@ -474,7 +506,7 @@ export class CatRun {
       this.kills++;
       this.emit({ t: 'kill', x: en.x, y: en.y, kind: en.kind, elite: en.elite });
       if (en.xp) this.dropGem(en.x, en.y, en.xp);
-      if (en.elite && en.kind !== 'mop') this.dropPickup(en.x, en.y, 'food');
+      if (en.elite) this.dropPickup(en.x, en.y, 'chest');
       else if (this.rng.next() < PICKUP_CHANCE) this.dropPickup(en.x, en.y);
     }
   }
@@ -573,7 +605,7 @@ export class CatRun {
             const cy = p.y - i * h * 0.5;
             this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
             for (const en of this.enemies) {
-              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0);
+              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, this.evolved.claws ? 0.5 : 0);
             }
           }
           break;
@@ -599,6 +631,15 @@ export class CatRun {
           break;
         }
         case 'pot': {
+          if (this.evolved.pot) {
+            // Cactus fall: pots fly out in a spiral and pierce everything.
+            const turn = (this.tick % 90) / 90;
+            for (let i = 0; i < w.amount; i++) {
+              const a = (turn + i / w.amount) * Math.PI * 2;
+              this.shoot('pot', dcos(a), dsin(a), 330 * w.speed, { ...w, pierce: 999 }, 1.4, 14);
+            }
+            break;
+          }
           for (let i = 0; i < w.amount; i++) {
             const vx = (this.rng.next() - 0.5) * 2 * 160 + p.face * 40;
             this.shots.push({
@@ -625,7 +666,7 @@ export class CatRun {
             const dx = en.x - p.x;
             const dy = en.y - p.y;
             const d = len(dx, dy) || 1;
-            if (d < R + en.r) this.hit(en, w.dmg, (dx / d) * BALANCE.meowPush, (dy / d) * BALANCE.meowPush);
+            if (d < R + en.r) this.hit(en, w.dmg, (dx / d) * BALANCE.meowPush, (dy / d) * BALANCE.meowPush, this.evolved.meow ? 0.3 : 0);
           }
           break;
         }
@@ -649,7 +690,8 @@ export class CatRun {
           const R = 26 * w.area;
           for (const t of this.rng.sample(near, w.amount)) {
             this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
-            for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) this.hit(en, w.dmg, 0, 0);
+            const times = this.evolved.spark ? 2 : 1;
+            for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0);
           }
           break;
         }
@@ -667,7 +709,7 @@ export class CatRun {
       this.yarnLeft = Math.round(w.duration * TICK_RATE);
       this.cd.yarn = Math.round(w.cd * TICK_RATE);
     }
-    this.yarnLeft--;
+    if (!this.evolved.yarn) this.yarnLeft--;
     this.yarnAngle += DT * 3.2 * w.speed;
     const R = 72 * w.area;
     const r = 11 * w.area;
@@ -715,6 +757,7 @@ export class CatRun {
       }
       en.x += (ux * en.speed + en.kx) * DT;
       en.y += (uy * en.speed + en.ky) * DT;
+      [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
       if (d < en.r + p.r && p.inv <= 0 && !en.dead) {
@@ -790,8 +833,18 @@ export class CatRun {
 
   // Puddles hurt everything inside twice a second.
   private tickZones(): void {
+    const flood = this.evolved.glass;
     for (const z of this.zones) {
       z.life--;
+      if (flood) {
+        // Flood: puddles grow and creep after the cat.
+        const dx = this.player.x - z.x;
+        const dy = this.player.y - z.y;
+        const d = len(dx, dy) || 1;
+        z.x += (dx / d) * 45 * DT;
+        z.y += (dy / d) * 45 * DT;
+        z.r += 6 * DT;
+      }
       if (z.life % 15 !== 0) continue;
       for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0);
     }
@@ -838,6 +891,9 @@ export class CatRun {
         case 'plug':
           this.freeze = FREEZE_TICKS;
           break;
+        case 'chest':
+          this.openChest();
+          break;
         case 'alarm':
           for (const en of this.enemies) {
             if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, 0);
@@ -845,6 +901,39 @@ export class CatRun {
           break;
       }
     }
+  }
+
+  // Weapons ready to evolve: level 8 and their passive owned.
+  evolvable(): WeaponId[] {
+    return this.weapons().filter((w) => !this.evolved[w] && this.lvl(w) >= itemMax(w) && this.lvl(EVOLUTIONS[w].passive) > 0);
+  }
+
+  // A chest evolves a ready weapon; otherwise it levels up 1 item, or with
+  // luck 3 or 5.
+  private openChest(): void {
+    const evolved: WeaponId[] = [];
+    const ready = this.evolvable();
+    if (ready.length) {
+      this.evolved[ready[0]] = true;
+      evolved.push(ready[0]);
+    }
+    const items: ItemId[] = [];
+    if (!evolved.length) {
+      const r = this.rng.next();
+      const count = r < 0.03 * this.stats.luck ? 5 : r < 0.12 * this.stats.luck ? 3 : 1;
+      for (let i = 0; i < count; i++) {
+        const open = (Object.keys(this.items) as ItemId[]).filter((k) => this.lvl(k) < itemMax(k));
+        if (!open.length) {
+          this.fish += 10;
+          break;
+        }
+        const k = this.rng.pick(open);
+        this.items[k] = this.lvl(k) + 1;
+        items.push(k);
+      }
+      this.recompute();
+    }
+    this.emit({ t: 'chest', evolved, items });
   }
 
   // ---------- levels ----------

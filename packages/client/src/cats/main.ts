@@ -273,14 +273,15 @@ function updateHud(run: CatRun, ghost: CatRun | null): void {
   const who = el.dataset.ghost ?? 'призрак';
   // Owned weapons and passives with levels, redrawn only when they change.
   const slots = el.querySelector<HTMLElement>('.slots')!;
-  const sig = JSON.stringify(run.items);
+  const sig = JSON.stringify([run.items, run.evolved]);
   if (slots.dataset.sig !== sig) {
     slots.dataset.sig = sig;
     const row = (ids: ItemId[]) => {
       const r = h('div', 'row');
       for (const k of ids) {
-        const u = h('span', 'slot');
-        u.append(icon(k, 18), h('b', '', String(run.lvl(k))));
+        const evo = isWeapon(k) && run.evolved[k];
+        const u = h('span', evo ? 'slot evo' : 'slot');
+        u.append(icon(k, 18), h('b', '', evo ? '★' : String(run.lvl(k))));
         r.append(u);
       }
       return r;
@@ -310,6 +311,23 @@ function levelUp(cards: CardId[], levels: number[], choose: (i: number) => void,
   ui.append(box);
 }
 
+// Which weapons evolve with which passive, and how far each pair is.
+function evolutionList(run: CatRun): HTMLElement {
+  const list = h('div', 'evos');
+  list.append(h('b', '', 'Эволюции'));
+  for (const w of run.weapons()) {
+    const evo = cats.EVOLUTIONS[w];
+    const has = run.lvl(evo.passive) > 0;
+    const status = run.evolved[w]
+      ? '★ готово'
+      : run.lvl(w) >= cats.WEAPON_MAX && has
+        ? 'ждёт сундук'
+        : `ур. ${run.lvl(w)}/8${has ? '' : `, нужна «${cats.PASSIVES[evo.passive].name}»`}`;
+    list.append(h('span', run.evolved[w] ? 'done' : '', `${cats.WEAPONS[w].name} → ${evo.name}: ${status}`));
+  }
+  return list;
+}
+
 function pauseMenu(): void {
   if (!game || game.run.over || ui.querySelector('.overlay:not(.level)')) return;
   game.setPaused(true);
@@ -323,6 +341,7 @@ function pauseMenu(): void {
     button('Выйти в меню', 'btn secondary', () => menu()),
   );
   if (serverRun) box.append(h('p', '', 'Забег сохранён, его можно продолжить позже.'));
+  box.append(evolutionList(game.run));
   ui.append(box);
 }
 

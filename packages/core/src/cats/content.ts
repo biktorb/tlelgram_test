@@ -187,6 +187,25 @@ export const PASSIVES: Record<PassiveId, PassiveDef> = {
   blackcat: { name: 'Чёрная кошка', max: 5, per: { luck: 0.1 }, desc: 'Удача +10%: чаще 4-я карточка' },
 };
 
+// A weapon at level 8 plus its passive becomes its evolution from the next
+// chest, as in Vampire Survivors.
+export interface EvolutionDef {
+  name: string;
+  passive: PassiveId;
+  desc: string;
+}
+
+export const EVOLUTIONS: Record<WeaponId, EvolutionDef> = {
+  claws: { name: 'Когти тигра', passive: 'belly', desc: 'Бьют в обе стороны, шире, и каждый удар лечит кота' },
+  laser: { name: 'Лазерное шоу', passive: 'box', desc: 'Стреляет без паузы' },
+  fish: { name: 'Рыбный дождь', passive: 'paws', desc: 'Непрерывный поток рыбок' },
+  yarn: { name: 'Вечный клубок', passive: 'patience', desc: 'Клубки кружат не переставая' },
+  meow: { name: 'Оглушительное МЯУ', passive: 'purr', desc: 'Аура больше и лечит за каждого задетого' },
+  glass: { name: 'Потоп', passive: 'catnip', desc: 'Лужи растут и ползут за котом' },
+  pot: { name: 'Кактусопад', passive: 'bigpaws', desc: 'Горшки разлетаются спиралью и пробивают всех' },
+  spark: { name: 'Грозовой кот', passive: 'pack', desc: 'Каждая искра бьёт дважды' },
+};
+
 export const WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
 export const PASSIVE_IDS = Object.keys(PASSIVES) as PassiveId[];
 export const isWeapon = (id: CardId): id is WeaponId => id in WEAPONS;
