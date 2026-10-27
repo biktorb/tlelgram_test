@@ -238,13 +238,9 @@ export class Game {
       const dy = s.y - s.oy;
       const d = Math.hypot(dx, dy);
       if (d > 8) {
+        // The ring stays where the finger went down; the direction is all that counts.
         x = dx / d;
         y = dy / d;
-        // The ring follows a finger that drags too far, so turning back is instant.
-        if (d > 60) {
-          s.ox = s.x - x * 60;
-          s.oy = s.y - y * 60;
-        }
       }
     }
     const k = this.keys;
