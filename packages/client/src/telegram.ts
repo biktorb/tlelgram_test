@@ -47,31 +47,15 @@ const tg: WebApp | null = window.Telegram?.WebApp ?? null;
 // The SDK script also loads in a plain browser; only an actual Telegram launch has a platform.
 const inTelegram = !!tg && tg.platform !== 'unknown';
 
-const THEME_TOKENS: [keyof ThemeParams, string][] = [
-  ['bg_color', '--bg'],
-  ['section_bg_color', '--surface'],
-  ['text_color', '--ink'],
-  ['hint_color', '--muted'],
-  ['button_color', '--accent'],
-  ['button_text_color', '--accent-ink'],
-  ['destructive_text_color', '--bad'],
-];
+// The game keeps its own light palette whatever the Telegram theme: taking
+// the theme's text colour made labels white on white in dark mode. Only the
+// Telegram header and background are painted to match the game.
+const PAPER = '#fff8ee';
 
 function applyTheme(): void {
   if (!tg) return;
-  const root = document.documentElement;
-  const p = tg.themeParams;
-  for (const [key, token] of THEME_TOKENS) {
-    const value = p[key];
-    if (value) root.style.setProperty(token, value);
-  }
-  if (!p.section_bg_color && p.secondary_bg_color) root.style.setProperty('--surface', p.secondary_bg_color);
-  root.dataset.scheme = tg.colorScheme;
-  root.style.colorScheme = tg.colorScheme;
-  if (p.bg_color) {
-    tg.setHeaderColor?.(p.bg_color);
-    tg.setBackgroundColor?.(p.bg_color);
-  }
+  tg.setHeaderColor?.(PAPER);
+  tg.setBackgroundColor?.(PAPER);
 }
 
 export function initTelegram(): void {

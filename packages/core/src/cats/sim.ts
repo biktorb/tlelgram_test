@@ -46,12 +46,14 @@ const SCREEN_Y = 460;
 export const BALANCE = {
   hpPerMin: 0.15, // enemy health grows by this share every minute
   hpPerMin2: 0.03, // and by this share every minute squared, to keep up with upgrades
-  crowdStart: 10, // fewest enemies around the cat at the start
-  crowdEnd: 240, // and at 20:00
+  crowdScale: 1, // multiplies the fewest enemies of every minute (CROWD)
   burstEvery: 1.2, // seconds between extra spawns
   meowPush: 90, // knockback of the meow aura
-  xpPerMin: 0.1, // gems grow by this share every minute, as levels get dearer
+  xpPerMin: 0.2, // gems grow by this share every minute, as levels get dearer
 };
+
+// The fewest enemies around the cat in each minute, after Mad Forest.
+const CROWD = [15, 30, 50, 45, 40, 40, 60, 80, 100, 90, 100, 160, 150, 160, 180, 200, 220, 240, 220, 260];
 
 // The room's enemy mix by minute: weights of each kind.
 const WAVES: { from: number; mix: Partial<Record<EnemyKind, number>> }[] = [
@@ -297,6 +299,11 @@ export class CatRun {
     return w;
   }
 
+  // Ticks until the weapon attacks again (0 or less: this tick).
+  readyIn(id: WeaponId): number {
+    return this.cd[id] ?? 0;
+  }
+
   // Advances one tick. Does nothing while a card choice is pending.
   step(dir: number): void {
     if (this.over || this.pending) return;
@@ -417,9 +424,8 @@ export class CatRun {
   }
 
   private spawner(): void {
-    const f = this.tick / RUN_TICKS;
     // Keep a crowd around the cat, growing over the run.
-    const crowd = Math.round(BALANCE.crowdStart + (BALANCE.crowdEnd - BALANCE.crowdStart) * f);
+    const crowd = Math.round(CROWD[Math.min(CROWD.length - 1, Math.floor(this.time / 60))] * BALANCE.crowdScale);
     let n = 0;
     while (this.enemies.length < Math.min(crowd, MAX_ENEMIES) && n++ < 6) this.spawn(this.pickKind());
     // And small bursts on top of it.
@@ -432,7 +438,7 @@ export class CatRun {
     }
     if (ELITE_TICKS.includes(this.tick)) {
       const e = this.spawn('bigrobot', true);
-      e.hp = e.maxHp = ENEMIES.bigrobot.hp * (1 + this.time / 60);
+      e.hp = e.maxHp = ENEMIES.bigrobot.hp * this.level; // like VS bosses: health times the cat's level
       this.emit({ t: 'elite' });
     }
     if (this.tick === BOSS_TICK) {
