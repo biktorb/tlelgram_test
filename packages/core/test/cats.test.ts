@@ -263,13 +263,36 @@ test('every room plays with its own enemies, walls and boss, and replays the sam
   // The yard's enemies come from its own waves.
   const yard = new cats.CatRun(3, { room: 'yard' });
   for (let i = 0; i < 90; i++) yard.step(0);
-  assert.ok(yard.enemies.length > 0 && yard.enemies.every((e) => e.kind === 'pigeon'));
+  assert.ok(yard.enemies.length > 0 && yard.enemies.every((e) => e.kind === 'crow'));
   // A hose comes as a chain of segments.
   const hall = new cats.CatRun(3, { room: 'warehouse' });
-  for (let i = 0; i < 4 * 60 * 30 && !hall.over; i++) {
+  for (let i = 0; i < 1.5 * 60 * 30 && !hall.over; i++) {
     hall.step(0);
     hall.player.hp = hall.player.maxHp;
     while (hall.pending) hall.choose(0);
   }
   assert.ok(hall.enemies.some((e) => e.kind === 'hose' && e.leader));
+});
+
+test('enemies keep their strength all run; swarms and the wall come by the wave table', () => {
+  const run = new cats.CatRun(5, { room: 'flat' });
+  const seen = new Set<string>();
+  let swarm = 0;
+  let wall = 0;
+  for (let i = 0; i < 11 * 60 * 30 && !run.over; i++) {
+    run.step(0);
+    run.player.hp = run.player.maxHp;
+    while (run.pending) run.choose(0);
+    for (const e of run.enemies) {
+      if (e.elite || e.kind === 'wall') continue;
+      if (e.swarm) swarm++;
+      else assert.equal(e.maxHp, cats.ENEMIES[e.kind].hp, e.kind);
+      seen.add(e.kind);
+    }
+    if (run.enemies.some((e) => e.kind === 'wall')) wall++;
+  }
+  // Minute 2 always has a swarm of mice, minutes 5 and 10 a wall.
+  assert.ok(swarm > 0, 'a swarm flew by');
+  assert.ok(wall > 0, 'the wall closed in');
+  for (const k of ['mouse', 'redmouse', 'dust', 'mite', 'wetbot', 'robot', 'rat']) assert.ok(seen.has(k), k);
 });
