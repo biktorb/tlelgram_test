@@ -262,6 +262,10 @@ export class CatRun {
   rerolls = 1;
   revives = 0; // Девятая жизнь left
   evolved: Partial<Record<WeaponId, boolean>> = {};
+  // Damage dealt by each weapon, and the tick it was picked up, for the
+  // stats on the pause and end screens (as in VS).
+  damage: Partial<Record<WeaponId, number>> = {};
+  since: Partial<Record<WeaponId, number>> = {};
   readonly map: RoomMap;
   // Tick when every slot was full and maxed, or -1.
   fullTick = -1;
@@ -306,6 +310,7 @@ export class CatRun {
     this.revives = this.powers.revive ?? 0;
     this.map = new RoomMap(this.seed, ROOMS[this.room].shape);
     this.items[HEROES[this.hero].weapon] = 1;
+    this.since[HEROES[this.hero].weapon] = 0;
     this.recompute();
     this.player.hp = this.player.maxHp;
   }
@@ -645,9 +650,10 @@ export class CatRun {
 
   // ---------- combat ----------
   // `heal` is health the cat gets back for the hit (evolved claws and meow).
-  private hit(en: Enemy, dmg: number, kx: number, ky: number, heal = 0): void {
+  private hit(en: Enemy, dmg: number, kx: number, ky: number, src: WeaponId | null, heal = 0): void {
     if (en.dead || en.kind === 'cleaner') return;
     if (heal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+    if (src) this.damage[src] = (this.damage[src] ?? 0) + Math.min(dmg, Math.max(0, en.hp));
     en.hp -= dmg;
     en.hitTick = this.tick;
     // Big enemies are heavy: knockback shrinks with size.
@@ -783,7 +789,7 @@ export class CatRun {
         const cy = p.y - i * h * 0.5;
         this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
         for (const en of this.enemies) {
-          if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, this.evolved.claws ? 0.5 : 0);
+          if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, 'claws', this.evolved.claws ? 0.5 : 0);
         }
         break;
       }
@@ -844,7 +850,7 @@ export class CatRun {
         const R = 26 * w.area;
         this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
         const times = this.evolved.spark ? 2 : 1;
-        for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0);
+        for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0, 'spark');
         break;
       }
     }
@@ -867,7 +873,7 @@ export class CatRun {
       if (en.dead || en.meowTick > this.tick) continue;
       if ((en.x - p.x) ** 2 + (en.y - p.y) ** 2 < (R + en.r) ** 2) {
         en.meowTick = this.tick + every;
-        this.hit(en, w.dmg, 0, 0, this.evolved.meow ? 0.3 : 0);
+        this.hit(en, w.dmg, 0, 0, 'meow', this.evolved.meow ? 0.3 : 0);
       }
     }
   }
@@ -896,7 +902,7 @@ export class CatRun {
         if (en.dead || en.yarnTick > this.tick) continue;
         if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + r) ** 2) {
           en.yarnTick = this.tick + Math.round(1.7 * TICK_RATE); // the VS hitbox delay
-          this.hit(en, w.dmg, c * 60, s * 60);
+          this.hit(en, w.dmg, c * 60, s * 60, 'yarn');
         }
       }
     }
@@ -1156,7 +1162,7 @@ export class CatRun {
         if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 >= (en.r + s.r) ** 2 || s.hits.includes(en.id)) continue;
         s.hits.push(en.id);
         const v = len(s.vx, s.vy) || 1;
-        this.hit(en, s.dmg, (s.vx / v) * 40, (s.vy / v) * 40);
+        this.hit(en, s.dmg, (s.vx / v) * 40, (s.vy / v) * 40, s.kind);
         if (s.pierce-- <= 0) s.life = 0;
       }
     }
@@ -1177,7 +1183,7 @@ export class CatRun {
         z.r += 6 * DT;
       }
       if (z.life % 15 !== 0) continue;
-      for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0);
+      for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0, 'glass');
     }
   }
 
@@ -1228,7 +1234,7 @@ export class CatRun {
           break;
         case 'alarm':
           for (const en of this.enemies) {
-            if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, 0);
+            if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, 0, null);
           }
           break;
       }
@@ -1323,6 +1329,7 @@ export class CatRun {
       this.fish += 10;
       return;
     }
+    if (isWeapon(k) && !this.lvl(k)) this.since[k] = this.tick;
     this.items[k] = this.lvl(k) + 1;
     this.recompute();
   }
