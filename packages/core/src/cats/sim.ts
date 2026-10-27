@@ -943,7 +943,8 @@ export class CatRun {
       const r = this.rng.next();
       const count = r < 0.03 * this.stats.luck ? 5 : r < 0.12 * this.stats.luck ? 3 : 1;
       for (let i = 0; i < count; i++) {
-        const open = (Object.keys(this.items) as ItemId[]).filter((k) => this.lvl(k) < itemMax(k));
+        // Items on the cards waiting to be picked are left alone.
+        const open = (Object.keys(this.items) as ItemId[]).filter((k) => this.lvl(k) < itemMax(k) && !this.pending?.includes(k));
         if (!open.length) {
           this.fish += 10;
           break;
@@ -992,6 +993,11 @@ export class CatRun {
       return;
     }
     if (k === 'fishes') {
+      this.fish += 10;
+      return;
+    }
+    // A card shown before a chest maxed the item gives fish instead.
+    if (this.lvl(k) >= itemMax(k)) {
       this.fish += 10;
       return;
     }
