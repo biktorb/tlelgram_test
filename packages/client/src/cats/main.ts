@@ -383,6 +383,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     run.won ? catPicture(100) : h('div', 'big', '😿'),
     h('h1', '', run.won ? 'Кот выстоял!' : 'Кота засосало'),
     h('p', 'result', `${mmss(run.tick)} · ${run.kills} врагов · уровень ${run.level}`),
+    ...(run.tick > RUN_SECONDS * TICK_RATE ? [h('p', 'best', `От Уборщицы ${Math.floor((run.tick - RUN_SECONDS * TICK_RATE) / TICK_RATE)} с`)] : []),
   );
   if (vs) box.append(h('p', 'vs', vs));
   if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги`));

@@ -8,7 +8,7 @@
 // outlines are a darker shade of the fill, eyes are white with a pupil.
 // The drawn cat, dog and mouse are only used until the SVGs have loaded.
 
-export type SpriteId = 'cat' | 'mouse' | 'dog' | 'dust' | 'vacuum' | 'boss' | 'fish' | 'yarn';
+export type SpriteId = 'cat' | 'mouse' | 'dog' | 'dust' | 'cleaner' | 'vacuum' | 'boss' | 'fish' | 'yarn';
 
 const OUTLINE = '#3b3344';
 type Paint = (c: CanvasRenderingContext2D) => void;
@@ -131,6 +131,19 @@ const PAINT: Record<SpriteId, Paint> = {
     }
     blob(c, '#bdbac8', () => c.arc(50, 54, 30, 0, Math.PI * 2), 0, '#bdbac8');
     eyes(c, 50, 11, 6);
+  },
+  cleaner(c) {
+    // The Cleaner: a dark hooded figure in an apron with a bucket.
+    blob(c, '#3a3446', () => {
+      c.moveTo(50, 6);
+      c.quadraticCurveTo(84, 14, 82, 94);
+      c.lineTo(18, 94);
+      c.quadraticCurveTo(16, 14, 50, 6);
+    }, 4, '#1d1925');
+    blob(c, '#d9d4e3', () => c.ellipse(50, 34, 16, 18, 0, 0, Math.PI * 2), 3, '#8f879e');
+    blob(c, '#8c6cc9', () => c.rect(34, 56, 32, 34), 3, '#5b4590');
+    eyes(c, 32, 7, 4, true);
+    blob(c, '#9aa4b8', () => c.rect(70, 70, 22, 22), 3, '#5f6879');
   },
   vacuum(c) {
     // A robot vacuum seen from above: disc, bumper, sensor eye.

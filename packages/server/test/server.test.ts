@@ -214,7 +214,7 @@ for (const [name, makeStore] of stores) {
 
     test('rejects malformed records and runs of other players', async () => {
       const { run } = await start(2);
-      for (const bad of [{}, { moves: 'zz', picks: '' }, { moves: 'a', picks: 'x' }, { moves: `a${cats.RUN_TICKS + 1}`, picks: '' }]) {
+      for (const bad of [{}, { moves: 'zz', picks: '' }, { moves: 'a', picks: 'x' }, { moves: `a${cats.END_TICKS + 1}`, picks: '' }]) {
         const res = await post(2, `/api/runs/${run.id}/finish`, bad);
         assert.equal(res.statusCode, 400, JSON.stringify(bad));
       }
