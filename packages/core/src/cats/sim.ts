@@ -106,6 +106,15 @@ export interface RunResult {
   upgrades: Partial<Record<UpgradeId, number>>;
 }
 
+// League and season points of a finished run: one per full 30 seconds
+// survived, two more for a win.
+export const runPoints = (ticks: number, won: boolean): number => Math.floor(ticks / (30 * TICK_RATE)) + (won ? 2 : 0);
+
+export type Score = Pick<RunResult, 'won' | 'ticks' | 'kills'>;
+
+// Negative when a ranks above b: a win first, then the longer run, then more kills.
+export const compareScores = (a: Score, b: Score): number => Number(b.won) - Number(a.won) || b.ticks - a.ticks || b.kills - a.kills;
+
 export class CatRun {
   readonly seed: number;
   readonly rng: Rng;

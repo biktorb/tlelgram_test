@@ -1,4 +1,4 @@
-// Cosmetics and daily tasks. Nothing here changes a unit or a battle.
+// Cosmetics and daily tasks. Nothing here makes the cat stronger.
 
 export interface Frame {
   id: string;
@@ -7,7 +7,9 @@ export interface Frame {
   exclusive?: boolean; // not sold: a season pass reward
 }
 
-// Card frames: the player's cards wear the equipped one, opponents see it too.
+// Auras: the coloured ring under the player's cat; friends see it on the
+// ghost too. Ids and names are kept from the old card frames, so bought
+// items carry over.
 export const FRAMES: Frame[] = [
   { id: 'gold', name: 'Золотая', price: 100 },
   { id: 'mint', name: 'Мятная', price: 100 },
@@ -29,13 +31,13 @@ export interface TaskDef {
 // The same three tasks every day; progress counts runs finished that day (Moscow time).
 export const DAILY_TASKS: TaskDef[] = [
   { id: 'runs', title: 'Сыграйте 2 забега', goal: 2, reward: 20 },
-  { id: 'wins', title: 'Одержите 6 побед', goal: 6, reward: 30 },
+  { id: 'minutes', title: 'Продержитесь в сумме 8 минут', goal: 8, reward: 30 },
   { id: 'daily', title: 'Сыграйте вызов дня', goal: 1, reward: 20 },
 ];
 
-// Season pass: a season is a calendar month (Moscow time). Every win in a run
-// played to the end earns a point; each level pays its reward once.
-export const SEASON_POINTS_PER_LEVEL = 15;
+// Season pass: a season is a calendar month (Moscow time). Finished runs earn
+// their points (cats.runPoints); each level pays its reward once.
+export const SEASON_POINTS_PER_LEVEL = 20;
 
 export type PassReward = { fish: number } | { frame: string };
 

@@ -1,42 +1,69 @@
-import type { BattleResult, RunState, Unit } from '@otryad/core';
+import { cats } from '@otryad/core';
 import type { GameEvent } from './stats.ts';
 
-export type GhostUnit = Omit<Unit, 'uid'>;
+export type RunRecord = cats.RunRecord;
+export type RunMode = 'free' | 'daily' | 'duel';
 
-export interface StoredRun {
-  id: string;
-  userId: number;
-  version: number;
-  state: RunState;
-  finished: boolean;
-  duelCode: string | null; // set when the run answers a duel
-  daily: string | null; // YYYY-MM-DD of the daily challenge this run plays
+// What a finished run achieved, as the server's replay computed it.
+export interface RunOutcome {
+  won: boolean;
+  ticks: number;
+  kills: number;
+  level: number;
+  points: number;
 }
 
+export interface StoredRun extends RunOutcome {
+  id: string;
+  userId: number;
+  seed: number;
+  mode: RunMode;
+  daily: string | null; // YYYY-MM-DD of the daily challenge this run plays
+  duelCode: string | null; // the duel this run answers
+  aura: string | null;
+  startedAt: number; // ms
+  finished: boolean;
+  record: RunRecord | null; // the progress saved so far; the final input once finished
+}
+
+export interface NewRun {
+  seed: number;
+  mode: RunMode;
+  daily?: string | null;
+  duelCode?: string | null;
+  chatInstance?: string | null;
+  aura?: string | null;
+}
+
+// A finished run another player races against.
 export interface Ghost {
   name: string;
-  team: GhostUnit[];
-  frame: string | null; // the frame its player wore
+  aura: string | null;
+  seed: number;
+  record: RunRecord;
+  won: boolean;
+  ticks: number;
+  kills: number;
 }
 
 export interface Wallet {
   fish: number;
-  frame: string | null; // equipped frame, null for the plain one
+  frame: string | null; // equipped aura, null for none
   owned: string[];
 }
 
 export type BuyResult = 'ok' | 'owned' | 'poor';
 
-// A finished run shared by link. Friends play from the same seed and their
-// final team fights this team.
+// A finished run shared by link. Friends play its seed against its ghost.
 export interface Duel {
   code: string;
   runId: string;
   challengerId: number;
   challengerName: string;
-  seed: number;
-  wins: number;
-  team: GhostUnit[];
+}
+
+export interface DuelWithRun extends Duel {
+  run: StoredRun;
 }
 
 export interface DuelResult {
@@ -44,30 +71,27 @@ export interface DuelResult {
   runId: string;
   userId: number;
   userName: string;
-  wins: number;
-  team: GhostUnit[];
-  battleSeed: number;
-  result: BattleResult; // the friend's result in battle(friend team, challenger team, battleSeed)
+  won: boolean;
+  ticks: number;
+  kills: number;
+  beat: boolean; // the friend did better than the challenger
 }
 
 export interface DuelInboxItem {
   userName: string;
-  wins: number;
-  result: BattleResult; // the friend's result
+  won: boolean;
+  ticks: number;
+  kills: number;
+  beat: boolean;
   isNew: boolean;
 }
 
-export interface NewRunOptions {
-  duelCode?: string | null; // the run answers this duel
-  chatInstance?: string | null; // the chat the game was opened from
-  daily?: string | null; // YYYY-MM-DD of the daily challenge
-}
-
-export interface DailyEntry {
+export interface ScoreRow {
   userId: number;
   name: string;
-  wins: number;
-  lives: number;
+  won: boolean;
+  ticks: number;
+  kills: number;
 }
 
 // Thrown by createRun when the player already has a run for that daily challenge.
@@ -89,45 +113,45 @@ export interface LeagueRow {
   points: number;
 }
 
-export interface ChatEntry {
-  userId: number;
-  name: string;
-  bestWins: number;
+export interface ChatEntry extends ScoreRow {
   runs: number;
 }
 
 export interface UserStats {
-  runs: number;
-  bestWins: number;
-  fullRuns: number; // runs that reached the win goal
+  runs: number; // finished runs
+  wins: number;
+  best: { won: boolean; ticks: number; kills: number } | null;
+}
+
+export interface Activity {
+  runs: number; // finished runs
+  ticks: number; // time survived in them
+  points: number;
 }
 
 export interface Store {
   upsertUser(id: number, firstName: string, username?: string): Promise<void>;
-  activeRun(userId: number): Promise<StoredRun | null>;
+  // The caller finishes the player's unfinished run first: there is at most one.
+  createRun(userId: number, run: NewRun): Promise<StoredRun>;
   getRun(runId: string): Promise<StoredRun | null>;
-  // Finishes the player's active run, if any, and starts a new one.
-  createRun(userId: number, state: RunState, opts?: NewRunOptions): Promise<StoredRun>;
-  // Saves only if the stored version still equals run.version; returns the
-  // new version, or null when another request got there first.
-  saveRun(run: StoredRun, state: RunState): Promise<number | null>;
-  addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame?: string | null): Promise<void>;
-  // Bulk insert of bot teams (no owner) for the cold start.
-  addGhosts(rows: { round: number; wins: number; name: string; team: GhostUnit[] }[]): Promise<void>;
-  // A recent team from the same round with the closest win count, never the player's own.
-  pickGhost(round: number, wins: number, excludeUserId: number, random: () => number): Promise<Ghost | null>;
-  ghostCount(): Promise<number>;
+  activeRun(userId: number): Promise<StoredRun | null>;
+  // Keeps an unfinished run's input so far, to continue it later; false once finished.
+  saveProgress(runId: string, record: RunRecord): Promise<boolean>;
+  // Saves the result once; false when the run was already finished.
+  finishRun(runId: string, outcome: RunOutcome, record: RunRecord): Promise<boolean>;
+  dailyRun(userId: number, date: string): Promise<StoredRun | null>;
+  // Finished runs of the day's challenge: a win, then the longest, then most kills, then who finished first.
+  dailyTop(date: string, limit: number): Promise<ScoreRow[]>;
+  // The player's place in that order, or null when their daily run is not finished.
+  dailyRank(userId: number, date: string): Promise<number | null>;
+  // The best finished run of the day by someone else, to race against.
+  dailyGhost(date: string, excludeUserId: number): Promise<Ghost | null>;
   // Returns the existing duel when this run was already shared.
   createDuel(duel: Duel): Promise<Duel>;
-  getDuel(code: string): Promise<Duel | null>;
+  getDuel(code: string): Promise<DuelWithRun | null>;
   addDuelResult(result: DuelResult): Promise<void>;
   // The latest answers to the player's duels, newest first; marks them seen.
   takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]>;
-  dailyRun(userId: number, date: string): Promise<StoredRun | null>;
-  // Finished runs of the day's challenge: most wins, then most lives left, then who finished first.
-  dailyTop(date: string, limit: number): Promise<DailyEntry[]>;
-  // The player's place in that order, or null when their daily run is not finished.
-  dailyRank(userId: number, date: string): Promise<number | null>;
   leagueEntry(userId: number, week: string): Promise<LeagueEntry | null>;
   // The player's entry for their most recent week before the given one.
   lastLeagueEntry(userId: number, beforeWeek: string): Promise<LeagueEntry | null>;
@@ -138,13 +162,12 @@ export interface Store {
   leagueTop(week: string, league: number, limit: number): Promise<LeagueRow[]>;
   // The player's place in that order (null when not in it) and the number of players.
   leagueStanding(userId: number, week: string, league: number): Promise<{ rank: number | null; size: number }>;
-  // Players of runs started from this chat since the given time, best result first.
+  // Each player's best run finished since the given time among runs started from this chat.
   chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]>;
   stats(userId: number): Promise<UserStats>;
   wallet(userId: number): Promise<Wallet>;
-  // The player's runs played to the end since the given time (abandoned ones
-  // don't count) and their wins.
-  dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }>;
+  // The player's runs finished since the given time (abandoned ones don't count).
+  activity(userId: number, since: Date): Promise<Activity>;
   claimedTasks(userId: number, day: string): Promise<string[]>;
   // Pays a task's reward (fish, and an item if given) at most once a day; false when it was already paid.
   claimTask(userId: number, day: string, task: string, reward: number, item?: string): Promise<boolean>;
@@ -156,26 +179,25 @@ export interface Store {
   close(): Promise<void>;
 }
 
-export const GHOST_CANDIDATES = 200;
+type MemRun = StoredRun & { chatInstance: string | null; finishedAt: number };
 
-export function closestGhost<T extends { wins: number }>(rows: T[], wins: number, random: () => number): T | null {
-  if (rows.length === 0) return null;
-  const best = Math.min(...rows.map((r) => Math.abs(r.wins - wins)));
-  const pool = rows.filter((r) => Math.abs(r.wins - wins) <= best + 1);
-  return pool[Math.floor(random() * pool.length)];
-}
+// The order of finished runs on every board; ties go to who finished first.
+const byScore = (a: MemRun, b: MemRun) => cats.compareScores(a, b) || a.finishedAt - b.finishedAt;
 
 // In-memory store for tests and local development without a database.
 export class MemoryStore implements Store {
   private users = new Map<number, { firstName: string; username?: string; fish: number; frame: string | null; items: Set<string> }>();
   private claims = new Map<string, number>(); // "user:day:task" -> reward
   private events: GameEvent[] = [];
-  private runs = new Map<string, StoredRun & { chatInstance: string | null; updatedAt: number }>();
-  private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[]; frame: string | null }[] = [];
+  private runs = new Map<string, MemRun>();
   private duels = new Map<string, Duel>();
   private duelResults: (DuelResult & { seen: boolean })[] = [];
   private leagues = new Map<string, LeagueEntry & { updatedAt: number }>();
   private seq = 0;
+
+  private name(userId: number): string {
+    return this.users.get(userId)?.firstName ?? 'Игрок';
+  }
 
   async upsertUser(id: number, firstName: string, username?: string): Promise<void> {
     const u = this.users.get(id);
@@ -183,9 +205,31 @@ export class MemoryStore implements Store {
     else this.users.set(id, { firstName, username, fish: 0, frame: null, items: new Set() });
   }
 
-  async activeRun(userId: number): Promise<StoredRun | null> {
-    for (const r of this.runs.values()) if (r.userId === userId && !r.finished) return toStored(r);
-    return null;
+  async createRun(userId: number, n: NewRun): Promise<StoredRun> {
+    const daily = n.daily ?? null;
+    if (daily && [...this.runs.values()].some((r) => r.userId === userId && r.daily === daily)) throw new DailyTakenError();
+    if (await this.activeRun(userId)) throw new Error('the player already has an unfinished run');
+    const run: MemRun = {
+      id: `run-${++this.seq}`,
+      userId,
+      seed: n.seed,
+      mode: n.mode,
+      daily,
+      duelCode: n.duelCode ?? null,
+      aura: n.aura ?? null,
+      startedAt: Date.now(),
+      finished: false,
+      record: null,
+      won: false,
+      ticks: 0,
+      kills: 0,
+      level: 0,
+      points: 0,
+      chatInstance: n.chatInstance ?? null,
+      finishedAt: 0,
+    };
+    this.runs.set(run.id, run);
+    return toStored(run);
   }
 
   async getRun(runId: string): Promise<StoredRun | null> {
@@ -193,66 +237,23 @@ export class MemoryStore implements Store {
     return r ? toStored(r) : null;
   }
 
-  async createRun(userId: number, state: RunState, opts: NewRunOptions = {}): Promise<StoredRun> {
-    const daily = opts.daily ?? null;
-    if (daily && [...this.runs.values()].some((r) => r.userId === userId && r.daily === daily)) throw new DailyTakenError();
-    for (const r of this.runs.values()) if (r.userId === userId) r.finished = true;
-    const run: StoredRun = { id: `run-${++this.seq}`, userId, version: 1, state, finished: state.finished, duelCode: opts.duelCode ?? null, daily };
-    this.runs.set(run.id, { ...structuredClone(run), chatInstance: opts.chatInstance ?? null, updatedAt: Date.now() });
-    return run;
+  async activeRun(userId: number): Promise<StoredRun | null> {
+    for (const r of this.runs.values()) if (r.userId === userId && !r.finished) return toStored(r);
+    return null;
   }
 
-  async saveRun(run: StoredRun, state: RunState): Promise<number | null> {
-    const cur = this.runs.get(run.id);
-    if (!cur || cur.version !== run.version) return null;
-    cur.version++;
-    cur.updatedAt = Date.now();
-    cur.state = structuredClone(state);
-    cur.finished = state.finished;
-    return cur.version;
+  async saveProgress(runId: string, record: RunRecord): Promise<boolean> {
+    const r = this.runs.get(runId);
+    if (!r || r.finished) return false;
+    r.record = { ...record };
+    return true;
   }
 
-  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame: string | null = null): Promise<void> {
-    this.ghosts.push({ round, wins, userId, name, team, frame });
-  }
-
-  async addGhosts(rows: { round: number; wins: number; name: string; team: GhostUnit[] }[]): Promise<void> {
-    for (const r of rows) this.ghosts.push({ ...r, userId: null, frame: null });
-  }
-
-  async pickGhost(round: number, wins: number, excludeUserId: number, random: () => number): Promise<Ghost | null> {
-    const rows = this.ghosts
-      .filter((g) => g.round === round && g.userId !== excludeUserId)
-      .slice(-GHOST_CANDIDATES);
-    const g = closestGhost(rows, wins, random);
-    return g ? { name: g.name, team: g.team, frame: g.frame } : null;
-  }
-
-  async ghostCount(): Promise<number> {
-    return this.ghosts.length;
-  }
-
-  async createDuel(duel: Duel): Promise<Duel> {
-    for (const d of this.duels.values()) if (d.runId === duel.runId) return structuredClone(d);
-    this.duels.set(duel.code, structuredClone(duel));
-    return duel;
-  }
-
-  async getDuel(code: string): Promise<Duel | null> {
-    const d = this.duels.get(code);
-    return d ? structuredClone(d) : null;
-  }
-
-  async addDuelResult(result: DuelResult): Promise<void> {
-    if (this.duelResults.some((r) => r.runId === result.runId)) return;
-    this.duelResults.push({ ...structuredClone(result), seen: false });
-  }
-
-  async takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]> {
-    const mine = this.duelResults.filter((r) => this.duels.get(r.duelCode)?.challengerId === challengerId).slice(-limit).reverse();
-    const items = mine.map((r) => ({ userName: r.userName, wins: r.wins, result: r.result, isNew: !r.seen }));
-    for (const r of mine) r.seen = true;
-    return items;
+  async finishRun(runId: string, outcome: RunOutcome, record: RunRecord): Promise<boolean> {
+    const r = this.runs.get(runId);
+    if (!r || r.finished) return false;
+    Object.assign(r, outcome, { finished: true, record: { ...record }, finishedAt: Date.now() + ++this.seq / 1000 });
+    return true;
   }
 
   async dailyRun(userId: number, date: string): Promise<StoredRun | null> {
@@ -260,21 +261,48 @@ export class MemoryStore implements Store {
     return null;
   }
 
-  private dailyOrder(date: string) {
-    return [...this.runs.values()]
-      .filter((r) => r.daily === date && r.finished)
-      .sort((a, b) => b.state.wins - a.state.wins || b.state.lives - a.state.lives || a.updatedAt - b.updatedAt);
+  private dailyOrder(date: string): MemRun[] {
+    return [...this.runs.values()].filter((r) => r.daily === date && r.finished).sort(byScore);
   }
 
-  async dailyTop(date: string, limit: number): Promise<DailyEntry[]> {
+  async dailyTop(date: string, limit: number): Promise<ScoreRow[]> {
     return this.dailyOrder(date)
       .slice(0, limit)
-      .map((r) => ({ userId: r.userId, name: this.users.get(r.userId)?.firstName ?? 'Игрок', wins: r.state.wins, lives: r.state.lives }));
+      .map((r) => ({ userId: r.userId, name: this.name(r.userId), won: r.won, ticks: r.ticks, kills: r.kills }));
   }
 
   async dailyRank(userId: number, date: string): Promise<number | null> {
     const i = this.dailyOrder(date).findIndex((r) => r.userId === userId);
     return i < 0 ? null : i + 1;
+  }
+
+  async dailyGhost(date: string, excludeUserId: number): Promise<Ghost | null> {
+    const r = this.dailyOrder(date).find((x) => x.userId !== excludeUserId);
+    return r ? ghostOf(r, this.name(r.userId)) : null;
+  }
+
+  async createDuel(duel: Duel): Promise<Duel> {
+    for (const d of this.duels.values()) if (d.runId === duel.runId) return { ...d };
+    this.duels.set(duel.code, { ...duel });
+    return duel;
+  }
+
+  async getDuel(code: string): Promise<DuelWithRun | null> {
+    const d = this.duels.get(code);
+    const run = d && this.runs.get(d.runId);
+    return d && run ? { ...d, run: toStored(run) } : null;
+  }
+
+  async addDuelResult(result: DuelResult): Promise<void> {
+    if (this.duelResults.some((r) => r.runId === result.runId)) return;
+    this.duelResults.push({ ...result, seen: false });
+  }
+
+  async takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]> {
+    const mine = this.duelResults.filter((r) => this.duels.get(r.duelCode)?.challengerId === challengerId).slice(-limit).reverse();
+    const items = mine.map((r) => ({ userName: r.userName, won: r.won, ticks: r.ticks, kills: r.kills, beat: r.beat, isNew: !r.seen }));
+    for (const r of mine) r.seen = true;
+    return items;
   }
 
   async leagueEntry(userId: number, week: string): Promise<LeagueEntry | null> {
@@ -310,7 +338,7 @@ export class MemoryStore implements Store {
   async leagueTop(week: string, league: number, limit: number): Promise<LeagueRow[]> {
     return this.leagueOrder(week, league)
       .slice(0, limit)
-      .map((e) => ({ userId: e.userId, name: this.users.get(e.userId)?.firstName ?? 'Игрок', points: e.points }));
+      .map((e) => ({ userId: e.userId, name: this.name(e.userId), points: e.points }));
   }
 
   async leagueStanding(userId: number, week: string, league: number): Promise<{ rank: number | null; size: number }> {
@@ -320,23 +348,23 @@ export class MemoryStore implements Store {
   }
 
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
+    const done = [...this.runs.values()].filter((r) => r.chatInstance === chatInstance && r.finished && r.finishedAt >= since.getTime()).sort(byScore);
     const byUser = new Map<number, ChatEntry>();
-    for (const r of this.runs.values()) {
-      if (r.chatInstance !== chatInstance || r.updatedAt < since.getTime()) continue;
-      const e = byUser.get(r.userId) ?? { userId: r.userId, name: this.users.get(r.userId)?.firstName ?? 'Игрок', bestWins: 0, runs: 0 };
-      e.bestWins = Math.max(e.bestWins, r.state.wins);
-      e.runs++;
-      byUser.set(r.userId, e);
+    for (const r of done) {
+      const e = byUser.get(r.userId);
+      if (e) e.runs++;
+      else byUser.set(r.userId, { userId: r.userId, name: this.name(r.userId), won: r.won, ticks: r.ticks, kills: r.kills, runs: 1 });
     }
-    return [...byUser.values()].sort((a, b) => b.bestWins - a.bestWins || b.runs - a.runs).slice(0, limit);
+    return [...byUser.values()].slice(0, limit);
   }
 
   async stats(userId: number): Promise<UserStats> {
-    const mine = [...this.runs.values()].filter((r) => r.userId === userId);
+    const done = [...this.runs.values()].filter((r) => r.userId === userId && r.finished).sort(byScore);
+    const best = done[0];
     return {
-      runs: mine.length,
-      bestWins: Math.max(0, ...mine.map((r) => r.state.wins)),
-      fullRuns: mine.filter((r) => r.state.finished && r.state.lives > 0).length,
+      runs: done.length,
+      wins: done.filter((r) => r.won).length,
+      best: best ? { won: best.won, ticks: best.ticks, kills: best.kills } : null,
     };
   }
 
@@ -345,9 +373,13 @@ export class MemoryStore implements Store {
     return { fish: u?.fish ?? 0, frame: u?.frame ?? null, owned: [...(u?.items ?? [])] };
   }
 
-  async dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }> {
-    const done = [...this.runs.values()].filter((r) => r.userId === userId && r.state.finished && r.updatedAt >= since.getTime());
-    return { runs: done.length, wins: done.reduce((n, r) => n + r.state.wins, 0) };
+  async activity(userId: number, since: Date): Promise<Activity> {
+    const done = [...this.runs.values()].filter((r) => r.userId === userId && r.finished && r.finishedAt >= since.getTime());
+    return {
+      runs: done.length,
+      ticks: done.reduce((n, r) => n + r.ticks, 0),
+      points: done.reduce((n, r) => n + r.points, 0),
+    };
   }
 
   async claimedTasks(userId: number, day: string): Promise<string[]> {
@@ -391,8 +423,13 @@ export class MemoryStore implements Store {
   async close(): Promise<void> {}
 }
 
-function toStored({ id, userId, version, state, finished, duelCode, daily }: StoredRun): StoredRun {
-  return structuredClone({ id, userId, version, state, finished, duelCode, daily });
+function toStored(r: MemRun): StoredRun {
+  const { chatInstance: _c, finishedAt: _f, ...run } = r;
+  return { ...run, record: run.record && { ...run.record } };
+}
+
+export function ghostOf(r: StoredRun, name: string): Ghost {
+  return { name, aura: r.aura, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
 }
 
 function toEntry({ userId, week, league, moved, points, day, dayRuns }: LeagueEntry): LeagueEntry {
