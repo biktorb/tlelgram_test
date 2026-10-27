@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p packages/client",
     "dev": "npm run dev -w @otryad/client",
     "build": "npm run build -w @otryad/client",
-    "balance": "node tools/balance.ts"
+    "balance": "node tools/balance.ts",
+    "balance:cats": "node tools/cats-balance.ts"
   },
   "engines": { "node": ">=22.18" },
   "devDependencies": {
