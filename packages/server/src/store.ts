@@ -21,6 +21,7 @@ export interface StoredRun extends RunOutcome {
   daily: string | null; // YYYY-MM-DD of the daily challenge this run plays
   duelCode: string | null; // the duel this run answers
   aura: string | null;
+  hero: cats.HeroId;
   startedAt: number; // ms
   finished: boolean;
   record: RunRecord | null; // the progress saved so far; the final input once finished
@@ -38,12 +39,14 @@ export interface NewRun {
   duelCode?: string | null;
   chatInstance?: string | null;
   aura?: string | null;
+  hero?: cats.HeroId;
 }
 
 // A finished run another player races against.
 export interface Ghost {
   name: string;
   aura: string | null;
+  hero: cats.HeroId;
   seed: number;
   record: RunRecord;
   won: boolean;
@@ -131,6 +134,7 @@ export interface UserStats {
 export interface Activity {
   runs: number; // finished runs
   ticks: number; // time survived in them
+  kills: number;
   points: number;
 }
 
@@ -224,6 +228,7 @@ export class MemoryStore implements Store {
       daily,
       duelCode: n.duelCode ?? null,
       aura: n.aura ?? null,
+      hero: n.hero ?? 'ryzhik',
       startedAt: Date.now(),
       finished: false,
       record: null,
@@ -393,6 +398,7 @@ export class MemoryStore implements Store {
     return {
       runs: done.length,
       ticks: done.reduce((n, r) => n + r.ticks, 0),
+      kills: done.reduce((n, r) => n + r.kills, 0),
       points: done.reduce((n, r) => n + r.points, 0),
     };
   }
@@ -444,7 +450,7 @@ function toStored(r: MemRun): StoredRun {
 }
 
 export function ghostOf(r: StoredRun, name: string): Ghost {
-  return { name, aura: r.aura, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
+  return { name, aura: r.aura, hero: r.hero, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
 }
 
 function toEntry({ userId, week, league, moved, points, day, dayRuns }: LeagueEntry): LeagueEntry {

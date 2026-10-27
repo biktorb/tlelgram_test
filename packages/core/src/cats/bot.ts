@@ -1,4 +1,4 @@
-import { EVOLUTIONS, isPassive, type CardId } from './content.ts';
+import { EVOLUTIONS, isPassive, type CardId, type HeroId } from './content.ts';
 import { dirFromVector, Recorder } from './record.ts';
 import { CatRun, DIR_VECTORS } from './sim.ts';
 
@@ -125,9 +125,9 @@ export const BOT_SKILLS: Record<'sharp' | 'casual' | 'slow', BotSkill> = {
 };
 
 // Plays a whole run and returns its record.
-export function playBot(seed: number, style: BotStyle, skill: BotSkill): Recorder {
+export function playBot(seed: number, style: BotStyle, skill: BotSkill, hero?: HeroId): Recorder {
   const s = { ...style, fear: skill.fear };
-  const rec = new Recorder(new CatRun(seed, { events: false }));
+  const rec = new Recorder(new CatRun(seed, { events: false, hero }));
   let dir = 0;
   while (!rec.run.over) {
     if (rec.run.pending) rec.choose(botPick(rec.run, s));

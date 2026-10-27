@@ -1,5 +1,5 @@
 import { cats } from '@otryad/core';
-import { flashSprite, sprite, type SpriteId } from './sprites.ts';
+import { CAT_SIZE, catSprite, flashSprite, sprite, type SpriteId } from './sprites.ts';
 
 const { CatRun, DT, Recorder, decodeMoves, dirFromVector, resume } = cats;
 type CatRun = InstanceType<typeof cats.CatRun>;
@@ -21,6 +21,8 @@ export interface GameHooks {
 export interface GameOptions {
   ghost?: RunRecord; // a run to race against, from the same seed
   progress?: RunRecord; // input of an unfinished run, to continue it
+  hero?: cats.HeroId; // the player's cat
+  ghostHero?: cats.HeroId; // the cat the ghost played
 }
 
 interface Particle {
@@ -70,8 +72,8 @@ class Ghost {
   private picks: string;
   private i = 0;
   private pick = 0;
-  constructor(seed: number, rec: RunRecord) {
-    this.run = new CatRun(seed, { events: false });
+  constructor(seed: number, rec: RunRecord, hero?: cats.HeroId) {
+    this.run = new CatRun(seed, { events: false, hero });
     this.dirs = decodeMoves(rec.moves);
     this.picks = rec.picks;
   }
@@ -138,8 +140,9 @@ export class Game {
     this.cv = cv;
     this.ctx = cv.getContext('2d')!;
     this.hooks = hooks;
-    this.rec = opts.progress ? resume(seed, opts.progress) : new Recorder(new CatRun(seed));
-    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost) : null;
+    const hero = opts.hero;
+    this.rec = opts.progress ? resume(seed, opts.progress, { hero }) : new Recorder(new CatRun(seed, { hero }));
+    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost, opts.ghostHero) : null;
     // The ghost catches up with a continued run: one ghost step per tick played.
     for (let i = 0; i < this.run.tick; i++) this.ghost?.step();
     this.prevPlayer = [this.run.player.x, this.run.player.y];
@@ -413,6 +416,11 @@ export class Game {
     return p ? [p[0] + (x - p[0]) * a, p[1] + (y - p[1]) * a] : [x, y];
   }
 
+  private blitCat(hero: cats.HeroId, x: number, y: number, size: number, flip: boolean): void {
+    const px = size * this.zoom * this.dpr;
+    this.ctx.drawImage(catSprite(hero, px, flip), x - size / 2, y - size / 2, size, size);
+  }
+
   private blit(id: SpriteId, x: number, y: number, size: number, flip = false, flash = false): void {
     const c = this.ctx;
     const px = size * this.zoom * this.dpr;
@@ -667,7 +675,7 @@ export class Game {
       const gx = this.prevGhost[0] + (g.x - this.prevGhost[0]) * a;
       const gy = this.prevGhost[1] + (g.y - this.prevGhost[1]) * a;
       c.globalAlpha = 0.45;
-      this.blit('cat', gx, gy, 36, g.face < 0);
+      this.blitCat(this.ghost.run.hero, gx, gy, CAT_SIZE[this.ghost.run.hero] * 0.8, g.face < 0);
       c.globalAlpha = 1;
     }
 
@@ -682,7 +690,7 @@ export class Game {
       c.ellipse(px, py + 16, 22, 8, 0, 0, Math.PI * 2);
       c.fill();
       c.stroke();
-      this.blit('cat', px, py + (moving ? Math.sin(t * 16) * 2 : 0), 46, p.face < 0);
+      this.blitCat(run.hero, px, py + (moving ? Math.sin(t * 16) * 2 : 0), CAT_SIZE[run.hero], p.face < 0);
     }
 
     // Particles and floating numbers on top.

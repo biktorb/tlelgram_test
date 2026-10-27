@@ -964,7 +964,7 @@ export class CatRun {
     this.xp -= this.need;
     this.level++;
     this.need = xpToNext(this.level);
-    this.recompute(); // Рыжик's armor grows with level
+    this.recompute(); // the cat's bonus grows with level
     this.pending = this.offer();
     this.emit({ t: 'level' });
   }
@@ -1018,7 +1018,12 @@ export class CatRun {
         else s[key] += v;
       }
     }
+    // The cat's own bonus grows with its level.
+    const step = Math.min(3, 1 + Math.floor(this.level / 10));
     if (this.hero === 'ryzhik') s.armor += Math.min(5, Math.floor(this.level / 10));
+    else if (this.hero === 'murka') s.growth += 0.1 * step;
+    else if (this.hero === 'barsik') s.area += 0.1 * step;
+    else if (this.hero === 'snezhok' && this.level >= 20) s.amount += 1;
     const p = this.player;
     if (s.maxHp > p.maxHp) p.hp += s.maxHp - p.maxHp;
     p.maxHp = s.maxHp;

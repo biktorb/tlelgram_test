@@ -80,9 +80,9 @@ export class PgStore implements Store {
   async createRun(userId: number, n: NewRun): Promise<StoredRun> {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${RUN_COLUMNS}`,
-        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null],
+        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${RUN_COLUMNS}`,
+        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik'],
       );
       return toRun(rows[0]);
     } catch (e) {
@@ -296,11 +296,12 @@ export class PgStore implements Store {
   }
 
   async activity(userId: number, since: Date): Promise<Activity> {
-    const { rows } = await this.pool.query<{ runs: string; ticks: string | null; points: string | null }>(
-      'SELECT count(*) AS runs, sum(ticks) AS ticks, sum(points) AS points FROM cat_runs WHERE user_id = $1 AND finished_at >= $2',
+    const { rows } = await this.pool.query<{ runs: string; ticks: string | null; kills: string | null; points: string | null }>(
+      'SELECT count(*) AS runs, sum(ticks) AS ticks, sum(kills) AS kills, sum(points) AS points FROM cat_runs WHERE user_id = $1 AND finished_at >= $2',
       [userId, since],
     );
-    return { runs: Number(rows[0].runs), ticks: Number(rows[0].ticks ?? 0), points: Number(rows[0].points ?? 0) };
+    const r = rows[0];
+    return { runs: Number(r.runs), ticks: Number(r.ticks ?? 0), kills: Number(r.kills ?? 0), points: Number(r.points ?? 0) };
   }
 
   async claimedTasks(userId: number, day: string): Promise<string[]> {
@@ -373,7 +374,7 @@ export class PgStore implements Store {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUN_COLUMNS =
-  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, started_at, finished_at, won, ticks, kills, level, points, record";
+  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, started_at, finished_at, won, ticks, kills, level, points, record";
 const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
 
 interface ScoreSqlRow {
@@ -394,6 +395,7 @@ function toRun(row: {
   daily: string | null;
   duel_code: string | null;
   aura: string | null;
+  hero: StoredRun['hero'];
   started_at: Date;
   finished_at: Date | null;
   won: boolean;
@@ -411,6 +413,7 @@ function toRun(row: {
     daily: row.daily,
     duelCode: row.duel_code,
     aura: row.aura,
+    hero: row.hero,
     startedAt: row.started_at.getTime(),
     finished: row.finished_at !== null,
     won: row.won,

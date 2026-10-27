@@ -1,4 +1,4 @@
-import { CatRun, DIRECTIONS, END_TICKS } from './sim.ts';
+import { CatRun, DIRECTIONS, END_TICKS, type RunOptions } from './sim.ts';
 
 // A run is stored as its input only: the joystick direction of every tick
 // and the upgrade picked on every level-up. Replaying it on the same seed
@@ -86,10 +86,10 @@ export function decodeMoves(moves: string, maxTicks = END_TICKS): number[] {
 // Replays a record. If the input ends before the run does (the app was
 // closed, or another engine rounded differently), the cat stands still until
 // the run is over, so every record has exactly one result.
-export function replay(seed: number, rec: RunRecord, opts: { events?: boolean } = {}): CatRun {
+export function replay(seed: number, rec: RunRecord, opts: RunOptions = {}): CatRun {
   if (!/^[0-9r]*$/.test(rec.picks) || rec.picks.length > 400) throw new Error('bad picks');
   const dirs = decodeMoves(rec.moves);
-  const run = new CatRun(seed, { events: opts.events ?? false });
+  const run = new CatRun(seed, { ...opts, events: opts.events ?? false });
   let pick = 0;
   let i = 0;
   while (!run.over) {
@@ -107,9 +107,9 @@ export function replay(seed: number, rec: RunRecord, opts: { events?: boolean } 
 
 // Rebuilds a run from saved progress to continue it: unlike replay, it stops
 // where the input ends, possibly with an upgrade choice pending.
-export function resume(seed: number, rec: RunRecord, opts: { events?: boolean } = {}): Recorder {
+export function resume(seed: number, rec: RunRecord, opts: RunOptions = {}): Recorder {
   const dirs = decodeMoves(rec.moves);
-  const r = new Recorder(new CatRun(seed, { events: opts.events ?? true }));
+  const r = new Recorder(new CatRun(seed, { ...opts, events: opts.events ?? true }));
   let pick = 0;
   let i = 0;
   while (!r.run.over) {

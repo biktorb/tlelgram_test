@@ -20,6 +20,7 @@ export interface RunView {
   mode: RunMode;
   daily: string | null; // date of the daily challenge this run plays
   duel: string | null; // code of the duel this run answers
+  hero: cats.HeroId;
   progress: RunRecord | null; // input saved so far, to continue the run
 }
 
@@ -34,8 +35,17 @@ export interface FinishResult {
   duel?: { challengerName: string; challenger: { won: boolean; ticks: number; kills: number }; beat: boolean };
 }
 
+// A cat in the cat list: owned, or how far its unlock is.
+export interface HeroInfo {
+  id: cats.HeroId;
+  owned: boolean;
+  have: number; // fish, minutes or kills so far
+  need: number;
+}
+
 export interface Profile {
   fish: number;
+  heroes: HeroInfo[];
   frame: string | null;
   owned: string[];
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
@@ -118,7 +128,7 @@ export interface Notifier {
 const SPEED_MARGIN = 0.95;
 const SLACK_MS = 3000;
 
-const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, progress: r.record });
+const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, hero: r.hero, progress: r.record });
 
 const CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const DUEL_CODE = /^[a-zA-Z0-9]{8}$/;
@@ -148,7 +158,14 @@ export class Game {
 
   // Starts a run. A daily run that is not finished yet is continued instead;
   // any other unfinished run is closed with the progress it has.
-  async start(userId: number, playerName: string, mode: RunMode, duelCode: string | null = null, chatInstance: string | null = null): Promise<StartResult> {
+  async start(
+    userId: number,
+    playerName: string,
+    mode: RunMode,
+    duelCode: string | null = null,
+    chatInstance: string | null = null,
+    hero: cats.HeroId = 'ryzhik',
+  ): Promise<StartResult> {
     let seed = randomInt(0, 2 ** 31);
     let daily: string | null = null;
     let ghost: Ghost | null = null;
@@ -167,13 +184,15 @@ export class Game {
       ghost = ghostOf(duel.run, duel.challengerName);
       duelCode = duel.code;
     } else duelCode = null;
+    // Every mode is played with the player's own cat, a duel too.
+    if (!(await this.heroes(userId)).find((h) => h.id === hero)?.owned) throw new GameError(422, 'Этот кот ещё не открыт');
 
     const active = await this.store.activeRun(userId);
     if (active) await this.settle(active, playerName, active.record ?? { moves: '', picks: '' });
     try {
       const { frame } = await this.store.wallet(userId);
-      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame });
-      await this.track(userId, 'run_start', { mode });
+      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame, hero });
+      await this.track(userId, 'run_start', { mode, hero });
       return { run: view(run), ghost };
     } catch (e) {
       if (e instanceof DailyTakenError) throw new GameError(409, 'Вызов дня уже начат в другом окне');
@@ -233,7 +252,7 @@ export class Game {
   private async settle(run: StoredRun, playerName: string, rec: RunRecord): Promise<FinishResult | null> {
     let r;
     try {
-      r = await this.replay(run.seed, rec);
+      r = await this.replay(run.seed, rec, run.hero);
     } catch {
       throw new GameError(400, 'Неверная запись забега');
     }
@@ -241,7 +260,7 @@ export class Game {
     if (!(await this.store.finishRun(run.id, result, rec))) return null;
 
     await this.countLeagueRun(run.userId, result.points);
-    await this.track(run.userId, 'run_end', { seconds: Math.round(r.ticks / TICK_RATE), won: r.won, mode: run.mode, duel: run.mode === 'duel' });
+    await this.track(run.userId, 'run_end', { seconds: Math.round(r.ticks / TICK_RATE), won: r.won, mode: run.mode, duel: run.mode === 'duel', hero: run.hero });
     const out: FinishResult = { result };
     if (run.daily) out.daily = { rank: await this.store.dailyRank(run.userId, run.daily) };
     if (run.duelCode) {
@@ -336,7 +355,24 @@ export class Game {
     });
     for (const t of tasks) if (t.done && !claimed.includes(t.id)) await this.store.claimTask(userId, day, t.id, t.reward);
     const season = await this.season(userId, day);
-    return { ...(await this.store.wallet(userId)), tasks, season };
+    const [wallet, heroes] = await Promise.all([this.store.wallet(userId), this.heroes(userId)]);
+    return { ...wallet, heroes, tasks, season };
+  }
+
+  // Which cats the player has: bought ones are items, the others open by
+  // themselves once the achievement is reached.
+  async heroes(userId: number): Promise<HeroInfo[]> {
+    const [wallet, stats, total] = await Promise.all([this.store.wallet(userId), this.store.stats(userId), this.store.activity(userId, new Date(0))]);
+    return cats.HERO_IDS.map((id) => {
+      const u: cats.HeroDef['unlock'] = cats.HEROES[id].unlock;
+      if (!u) return { id, owned: true, have: 0, need: 0 };
+      if ('fish' in u) return { id, owned: wallet.owned.includes(`hero:${id}`), have: wallet.fish, need: u.fish };
+      if ('surviveMin' in u) {
+        const have = Math.floor((stats.best?.ticks ?? 0) / (60 * TICK_RATE));
+        return { id, owned: have >= u.surviveMin, have, need: u.surviveMin };
+      }
+      return { id, owned: total.kills >= u.kills, have: total.kills, need: u.kills };
+    });
   }
 
   // The month's pass: finished runs earn their points, every level reached pays once.
@@ -366,6 +402,14 @@ export class Game {
   }
 
   async buy(userId: number, item: string): Promise<Profile> {
+    const hero = item.startsWith('hero:') ? item.slice(5) : '';
+    if (cats.isHero(hero)) {
+      const u: cats.HeroDef['unlock'] = cats.HEROES[hero].unlock;
+      if (!u || !('fish' in u)) throw new GameError(422, 'Этого кота нельзя купить, он открывается сам');
+      if ((await this.store.buyItem(userId, item, u.fish)) === 'poor') throw new GameError(422, 'Не хватает рыбок');
+      await this.track(userId, 'shop_buy', { item, price: u.fish });
+      return this.profile(userId);
+    }
     const frame = frameById(item);
     if (!frame) throw new GameError(404, 'Такого товара нет');
     if (frame.exclusive) throw new GameError(422, 'Эту ауру можно только заработать в сезоне');

@@ -176,7 +176,7 @@ for (const [name, makeStore] of stores) {
     const start = async (userId: number, payload: object = {}, headers = auth(userId)) => {
       const res = await post(userId, '/api/runs', payload, headers);
       assert.equal(res.statusCode, 200, res.body);
-      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; progress: unknown }; ghost: any };
+      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; hero: string; progress: unknown }; ghost: any };
     };
     const finish = async (userId: number, runId: string, rec = AFK) => {
       const res = await post(userId, `/api/runs/${runId}/finish`, rec);
@@ -439,6 +439,36 @@ for (const [name, makeStore] of stores) {
       assert.equal(stats.days.length, 3);
       assert.ok(stats.days[0].runsStarted > 0, 'runs from earlier tests are counted');
       assert.ok(stats.days[0].shares > 0);
+    });
+
+    test('cats: locked ones cannot play, Мурка is bought, the run replays with its cat', async () => {
+      const profile = async (id: number) => (await get(id, '/api/profile')).json().profile;
+      const heroes = (await profile(170)).heroes;
+      assert.deepEqual(
+        heroes.map((h: { id: string; owned: boolean }) => [h.id, h.owned]),
+        [['ryzhik', true], ['murka', false], ['barsik', false], ['snezhok', false]],
+      );
+      assert.equal((await post(170, '/api/runs', { hero: 'murka' })).statusCode, 422);
+      assert.equal((await post(170, '/api/runs', { hero: 'tiger' })).statusCode, 400);
+      assert.equal((await post(170, '/api/shop/buy', { item: 'hero:barsik' })).statusCode, 422, 'Барсик opens by itself');
+      assert.equal((await post(170, '/api/shop/buy', { item: 'hero:murka' })).statusCode, 422, 'not enough fish');
+      await store.claimTask(170, '2026-01-01', 'gift', 300);
+      const bought = await post(170, '/api/shop/buy', { item: 'hero:murka' });
+      assert.equal(bought.statusCode, 200, bought.body);
+      assert.equal(bought.json().profile.fish, (await profile(170)).fish);
+      assert.ok(bought.json().profile.heroes.find((h: { id: string }) => h.id === 'murka').owned);
+
+      const { run } = await start(170, { hero: 'murka' });
+      assert.equal(run.hero, 'murka');
+      const bot = cats.playBot(run.seed, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, 'murka');
+      offset = 3600 * 1000;
+      const body = await finish(170, run.id, bot.record());
+      offset = 0;
+      assert.equal(body.result.kills, bot.run.kills);
+      const shared = (await post(170, `/api/runs/${run.id}/duel`)).json();
+      const duel = await start(171, { mode: 'duel', duel: shared.duel.code });
+      assert.equal(duel.ghost.hero, 'murka', 'the ghost keeps its cat');
+      assert.equal(duel.run.hero, 'ryzhik', 'the friend plays their own cat');
     });
 
     test('the runs page replays finished runs for the owner', async () => {

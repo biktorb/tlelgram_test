@@ -206,6 +206,39 @@ test('a run analysis matches its replay and counts every hit', () => {
   assert.equal(s.perMinute[0].alive, 2);
 });
 
+test('every cat starts with its weapon and stats, and its bonus grows', () => {
+  for (const id of cats.HERO_IDS) {
+    const run = new cats.CatRun(1, { hero: id });
+    assert.deepEqual(run.weapons(), [cats.HEROES[id].weapon]);
+  }
+  const barsik = new cats.CatRun(1, { hero: 'barsik' });
+  assert.equal(barsik.player.maxHp, 160);
+  assert.ok(barsik.stats.move < cats.BASE_STATS.move);
+  assert.equal(barsik.stats.area, 1.1);
+  const murka = new cats.CatRun(1, { hero: 'murka' });
+  assert.equal(murka.stats.growth, 1.1);
+  const snezhok = playTo(new cats.CatRun(1, { hero: 'snezhok' }), 20);
+  assert.equal(snezhok.stats.amount, 1 + snezhok.lvl('pack'));
+  assert.ok(snezhok.stats.move > cats.BASE_STATS.move);
+});
+
+test('a record replays the same with the same cat', () => {
+  const bot = cats.playBot(3, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, 'murka');
+  const rec = bot.record();
+  assert.deepEqual(cats.replay(3, rec, { hero: 'murka' }).result(), bot.run.result());
+  assert.equal(cats.analyze(3, rec, 'murka').kills, bot.run.kills);
+});
+
+// Gives a run levels by feeding it experience and taking the first card.
+function playTo(run: InstanceType<typeof cats.CatRun>, level: number) {
+  while (run.level < level && !run.over) {
+    run.xp = run.need;
+    run.step(0);
+    while (run.pending) run.choose(0);
+  }
+  return run;
+}
+
 test('an item never goes past its last level, even when a chest maxed it while cards were shown', () => {
   const run = new cats.CatRun(1);
   run.items.pot = cats.WEAPON_MAX;

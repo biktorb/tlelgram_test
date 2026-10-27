@@ -148,3 +148,15 @@ html, body {
 .evos { display: flex; flex-direction: column; gap: 4px; max-width: 340px; font-size: 13px; color: var(--muted); text-align: left; }
 .evos b { color: var(--ink); text-align: center; }
 .evos .done { color: var(--accent); font-weight: 800; }
+
+/* The cat list. */
+.btn.small { padding: 8px 12px; font-size: 15px; border-radius: 12px; }
+.herocard {
+  display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
+  padding: 10px 12px; border-radius: 16px; border: 3px solid var(--line); background: var(--card);
+}
+.herocard.on { border-color: var(--accent); }
+.herocard .hero { animation: none; flex: none; }
+.herocard .text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.herocard .text span { color: var(--muted); font-size: 13px; }
+.herocard .lv { color: var(--accent); font-weight: 900; font-size: 13px; max-width: 110px; text-align: right; }
