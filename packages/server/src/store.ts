@@ -11,6 +11,7 @@ export interface RunOutcome {
   kills: number;
   level: number;
   points: number;
+  fish: number; // paid to the player, with the Greed bonus
 }
 
 export interface StoredRun extends RunOutcome {
@@ -23,6 +24,7 @@ export interface StoredRun extends RunOutcome {
   aura: string | null;
   hero: cats.HeroId;
   room: cats.RoomId;
+  powers: cats.Powers;
   startedAt: number; // ms
   finished: boolean;
   record: RunRecord | null; // the progress saved so far; the final input once finished
@@ -42,6 +44,7 @@ export interface NewRun {
   aura?: string | null;
   hero?: cats.HeroId;
   room?: cats.RoomId;
+  powers?: cats.Powers;
 }
 
 // A finished run another player races against.
@@ -50,6 +53,7 @@ export interface Ghost {
   aura: string | null;
   hero: cats.HeroId;
   room: cats.RoomId;
+  powers: cats.Powers;
   seed: number;
   record: RunRecord;
   won: boolean;
@@ -61,6 +65,8 @@ export interface Wallet {
   fish: number;
   frame: string | null; // equipped aura, null for none
   owned: string[];
+  powers: cats.Powers;
+  powerSpent: number; // fish paid for the Power Ups, returned by a refund
 }
 
 export type BuyResult = 'ok' | 'owned' | 'poor';
@@ -190,6 +196,10 @@ export interface Store {
   // Spends fish on an item unless the player owns it or is short of fish.
   buyItem(userId: number, item: string, price: number): Promise<BuyResult>;
   setFrame(userId: number, frame: string | null): Promise<void>;
+  // Raises a Power Up from level `from` for `price` fish; 'owned' when its level is no longer `from`.
+  buyPower(userId: number, id: cats.PowerId, from: number, price: number): Promise<BuyResult>;
+  // Takes all Power Ups back and returns the fish paid for them.
+  refundPowers(userId: number): Promise<void>;
   addEvent(userId: number, name: string, data?: Record<string, unknown> | null): Promise<void>;
   eventsSince(since: Date): Promise<GameEvent[]>;
   close(): Promise<void>;
@@ -202,7 +212,7 @@ const byScore = (a: MemRun, b: MemRun) => cats.compareScores(a, b) || a.finished
 
 // In-memory store for tests and local development without a database.
 export class MemoryStore implements Store {
-  private users = new Map<number, { firstName: string; username?: string; fish: number; frame: string | null; items: Set<string> }>();
+  private users = new Map<number, { firstName: string; username?: string; fish: number; frame: string | null; items: Set<string>; powers: cats.Powers; powerSpent: number }>();
   private claims = new Map<string, number>(); // "user:day:task" -> reward
   private events: GameEvent[] = [];
   private runs = new Map<string, MemRun>();
@@ -218,7 +228,7 @@ export class MemoryStore implements Store {
   async upsertUser(id: number, firstName: string, username?: string): Promise<void> {
     const u = this.users.get(id);
     if (u) Object.assign(u, { firstName, username });
-    else this.users.set(id, { firstName, username, fish: 0, frame: null, items: new Set() });
+    else this.users.set(id, { firstName, username, fish: 0, frame: null, items: new Set(), powers: {}, powerSpent: 0 });
   }
 
   async createRun(userId: number, n: NewRun): Promise<StoredRun> {
@@ -235,6 +245,7 @@ export class MemoryStore implements Store {
       aura: n.aura ?? null,
       hero: n.hero ?? 'ryzhik',
       room: n.room ?? 'flat',
+      powers: { ...n.powers },
       startedAt: Date.now(),
       finished: false,
       record: null,
@@ -243,6 +254,7 @@ export class MemoryStore implements Store {
       kills: 0,
       level: 0,
       points: 0,
+      fish: 0,
       chatInstance: n.chatInstance ?? null,
       finishedAt: 0,
     };
@@ -271,6 +283,8 @@ export class MemoryStore implements Store {
     const r = this.runs.get(runId);
     if (!r || r.finished) return false;
     Object.assign(r, outcome, { finished: true, record: { ...record }, finishedAt: Date.now() + ++this.seq / 1000 });
+    const u = this.users.get(r.userId);
+    if (u) u.fish += outcome.fish;
     return true;
   }
 
@@ -400,7 +414,7 @@ export class MemoryStore implements Store {
 
   async wallet(userId: number): Promise<Wallet> {
     const u = this.users.get(userId);
-    return { fish: u?.fish ?? 0, frame: u?.frame ?? null, owned: [...(u?.items ?? [])] };
+    return { fish: u?.fish ?? 0, frame: u?.frame ?? null, owned: [...(u?.items ?? [])], powers: { ...u?.powers }, powerSpent: u?.powerSpent ?? 0 };
   }
 
   async activity(userId: number, since: Date): Promise<Activity> {
@@ -443,6 +457,25 @@ export class MemoryStore implements Store {
     if (u) u.frame = frame;
   }
 
+  async buyPower(userId: number, id: cats.PowerId, from: number, price: number): Promise<BuyResult> {
+    const u = this.users.get(userId);
+    if (!u) return 'poor';
+    if ((u.powers[id] ?? 0) !== from) return 'owned';
+    if (u.fish < price) return 'poor';
+    u.fish -= price;
+    u.powerSpent += price;
+    u.powers[id] = from + 1;
+    return 'ok';
+  }
+
+  async refundPowers(userId: number): Promise<void> {
+    const u = this.users.get(userId);
+    if (!u) return;
+    u.fish += u.powerSpent;
+    u.powerSpent = 0;
+    u.powers = {};
+  }
+
   async addEvent(userId: number, name: string, data: Record<string, unknown> | null = null): Promise<void> {
     this.events.push({ userId, name, data, at: Date.now() });
   }
@@ -460,7 +493,7 @@ function toStored(r: MemRun): StoredRun {
 }
 
 export function ghostOf(r: StoredRun, name: string): Ghost {
-  return { name, aura: r.aura, hero: r.hero, room: r.room, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
+  return { name, aura: r.aura, hero: r.hero, room: r.room, powers: r.powers, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
 }
 
 function toEntry({ userId, week, league, moved, points, day, dayRuns }: LeagueEntry): LeagueEntry {

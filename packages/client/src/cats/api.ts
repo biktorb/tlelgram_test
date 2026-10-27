@@ -12,6 +12,7 @@ export interface RunView {
   duel: string | null;
   hero: cats.HeroId;
   room: cats.RoomId;
+  powers: cats.Powers; // the Power Ups the run started with
   progress: RunRecord | null; // input saved so far
 }
 
@@ -20,6 +21,7 @@ export interface Ghost {
   aura: string | null;
   hero: cats.HeroId;
   room: cats.RoomId;
+  powers: cats.Powers;
   seed: number;
   record: RunRecord;
   won: boolean;
@@ -38,6 +40,7 @@ export interface Outcome {
   kills: number;
   level: number;
   points: number;
+  fish: number; // paid to the player, with the Greed bonus
 }
 
 export interface Finished {
@@ -90,6 +93,8 @@ export interface Profile {
   rooms: { id: cats.RoomId; owned: boolean }[];
   frame: string | null; // equipped aura
   owned: string[];
+  powers: cats.Powers;
+  powerSpent: number; // fish a refund returns
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
   season: { id: string; endsAt: string; points: number; perLevel: number; level: number; rewards: ({ fish: number } | { frame: string })[] };
 }
@@ -145,6 +150,7 @@ export class Api {
   league = async () => (await this.call<{ league: LeagueInfo }>('GET', '/api/league')).league;
   profile = async () => (await this.call<{ profile: Profile }>('GET', '/api/profile')).profile;
   shop = async (what: 'buy' | 'equip', item: string | null) => (await this.call<{ profile: Profile }>('POST', `/api/shop/${what}`, { item })).profile;
+  refund = async () => (await this.call<{ profile: Profile }>('POST', '/api/shop/refund')).profile;
   chat = async () => (await this.call<{ top: (Score & { runs: number })[] | null }>('GET', '/api/chat')).top;
   share = (runId: string) => this.call<{ duel: DuelInfo; link: string | null }>('POST', `/api/runs/${runId}/duel`);
   duel = async (code: string) => (await this.call<{ duel: DuelInfo }>('GET', `/api/duels/${encodeURIComponent(code)}`)).duel;

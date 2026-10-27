@@ -143,7 +143,7 @@ export async function buildApp(
       runs.map(async (r) => {
         let a = insights.get(r.id);
         if (!a) {
-          a = r.record ? analyze(r.seed, r.record, { hero: r.hero, room: r.room }).catch(() => null) : Promise.resolve(null);
+          a = r.record ? analyze(r.seed, r.record, { hero: r.hero, room: r.room, powers: r.powers }).catch(() => null) : Promise.resolve(null);
           insights.set(r.id, a);
           if (insights.size > 1000) insights.delete(insights.keys().next().value!);
         }
@@ -167,6 +167,11 @@ export async function buildApp(
     if (typeof req.body?.item !== 'string') throw new GameError(400, 'Не указан товар');
     await store.upsertUser(u.id, u.first_name, u.username);
     return { profile: await game.buy(u.id, req.body.item) };
+  });
+
+  app.post('/api/shop/refund', async (req) => {
+    const u = user(req);
+    return { profile: await game.refundPowers(u.id) };
   });
 
   app.post<{ Body: { item?: unknown } | null }>('/api/shop/equip', async (req) => {

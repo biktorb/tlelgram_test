@@ -22,6 +22,7 @@ export interface RunView {
   duel: string | null; // code of the duel this run answers
   hero: cats.HeroId;
   room: cats.RoomId;
+  powers: cats.Powers; // the Power Ups the run started with
   progress: RunRecord | null; // input saved so far, to continue the run
 }
 
@@ -56,6 +57,8 @@ export interface Profile {
   rooms: RoomInfo[];
   frame: string | null;
   owned: string[];
+  powers: cats.Powers;
+  powerSpent: number;
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
   season: {
     id: string; // YYYY-MM
@@ -139,7 +142,7 @@ export interface Notifier {
 const SPEED_MARGIN = 0.95;
 const SLACK_MS = 3000;
 
-const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, hero: r.hero, room: r.room, progress: r.record });
+const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, hero: r.hero, room: r.room, powers: r.powers, progress: r.record });
 
 const CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const DUEL_CODE = /^[a-zA-Z0-9]{8}$/;
@@ -205,8 +208,8 @@ export class Game {
     const active = await this.store.activeRun(userId);
     if (active) await this.settle(active, playerName, active.record ?? { moves: '', picks: '' });
     try {
-      const { frame } = await this.store.wallet(userId);
-      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame, hero, room });
+      const { frame, powers } = await this.store.wallet(userId);
+      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame, hero, room, powers });
       await this.track(userId, 'run_start', { mode, hero, room });
       return { run: view(run), ghost };
     } catch (e) {
@@ -267,11 +270,11 @@ export class Game {
   private async settle(run: StoredRun, playerName: string, rec: RunRecord): Promise<FinishResult | null> {
     let r;
     try {
-      r = await this.replay(run.seed, rec, { hero: run.hero, room: run.room });
+      r = await this.replay(run.seed, rec, { hero: run.hero, room: run.room, powers: run.powers });
     } catch {
       throw new GameError(400, 'Неверная запись забега');
     }
-    const result: RunOutcome = { won: r.won, ticks: r.ticks, kills: r.kills, level: r.level, points: cats.runPoints(r.ticks, r.won) };
+    const result: RunOutcome = { won: r.won, ticks: r.ticks, kills: r.kills, level: r.level, points: cats.runPoints(r.ticks, r.won), fish: cats.runFish(r.fish, run.powers) };
     if (!(await this.store.finishRun(run.id, result, rec))) return null;
 
     await this.countLeagueRun(run.userId, result.points);
@@ -427,6 +430,17 @@ export class Game {
   }
 
   async buy(userId: number, item: string): Promise<Profile> {
+    const power = item.startsWith('power:') ? item.slice(6) : '';
+    if (cats.isPower(power)) {
+      const { powers } = await this.store.wallet(userId);
+      const from = powers[power] ?? 0;
+      if (from >= cats.POWERS[power].max) throw new GameError(422, 'Это усиление уже на максимуме');
+      const price = cats.powerPrice(power, powers);
+      const res = await this.store.buyPower(userId, power, from, price);
+      if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
+      if (res === 'ok') await this.track(userId, 'shop_buy', { item, price });
+      return this.profile(userId);
+    }
     const hero = item.startsWith('hero:') ? item.slice(5) : '';
     if (cats.isHero(hero)) {
       const u: cats.HeroDef['unlock'] = cats.HEROES[hero].unlock;
@@ -444,6 +458,13 @@ export class Game {
       await this.store.setFrame(userId, frame.id);
       await this.track(userId, 'shop_buy', { item: frame.id, price: frame.price });
     }
+    return this.profile(userId);
+  }
+
+  // Returns every fish paid for Power Ups, to buy them again in another order.
+  async refundPowers(userId: number): Promise<Profile> {
+    await this.store.refundPowers(userId);
+    await this.track(userId, 'powers_refund');
     return this.profile(userId);
   }
 

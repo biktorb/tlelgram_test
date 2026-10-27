@@ -176,7 +176,7 @@ for (const [name, makeStore] of stores) {
     const start = async (userId: number, payload: object = {}, headers = auth(userId)) => {
       const res = await post(userId, '/api/runs', payload, headers);
       assert.equal(res.statusCode, 200, res.body);
-      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; hero: string; room: string; progress: unknown }; ghost: any };
+      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; hero: string; room: string; powers: cats.Powers; progress: unknown }; ghost: any };
     };
     const finish = async (userId: number, runId: string, rec = AFK) => {
       const res = await post(userId, `/api/runs/${runId}/finish`, rec);
@@ -186,7 +186,7 @@ for (const [name, makeStore] of stores) {
     // Starts a free run and finishes it standing still; returns its result.
     const play = async (userId: number, headers = auth(userId)) => {
       const { run } = await start(userId, {}, headers);
-      return (await finish(userId, run.id)).result as { won: boolean; ticks: number; kills: number; points: number };
+      return (await finish(userId, run.id)).result as { won: boolean; ticks: number; kills: number; points: number; fish: number };
     };
 
     test('rejects requests without Telegram auth', async () => {
@@ -208,7 +208,8 @@ for (const [name, makeStore] of stores) {
       offset = 3600 * 1000;
       const body = await finish(1, run.id, rec);
       offset = 0;
-      assert.deepEqual(body.result, { won: local.won, ticks: local.ticks, kills: local.kills, level: local.level, points: cats.runPoints(local.ticks, local.won) });
+      assert.deepEqual(body.result, { won: local.won, ticks: local.ticks, kills: local.kills, level: local.level, points: cats.runPoints(local.ticks, local.won), fish: local.fish });
+      assert.equal((await get(1, '/api/profile')).json().profile.fish >= local.fish, true, 'the run pays its fish');
       assert.equal((await post(1, `/api/runs/${run.id}/finish`, rec)).statusCode, 409, 'a run finishes once');
     });
 
@@ -383,15 +384,17 @@ for (const [name, makeStore] of stores) {
       assert.deepEqual(fresh.tasks.map((t: { progress: number }) => t.progress), [0, 0, 0]);
       assert.equal((await shop(120, 'buy', 'gold')).statusCode, 422, 'no fish yet');
 
-      await start(120); // abandoned: closed when the next run starts, and still counted
+      const abandoned = await start(120); // closed when the next run starts, and still counted
       const r1 = await play(120);
       const r2 = await play(120);
+      // Runs pay the fish picked up on the way.
+      const runFish = cats.replay(abandoned.run.seed, AFK).result().fish + r1.fish + r2.fish;
       const p = await profile(120);
       assert.deepEqual(p.tasks[0], { id: 'runs', title: 'Сыграйте 2 забега', goal: 2, reward: 20, progress: 2, done: true });
       // Minutes also count the abandoned run, which stood still until the end.
       assert.ok(p.tasks[1].progress >= Math.min(Math.floor((r1.ticks + r2.ticks) / (60 * cats.TICK_RATE)), 8));
       const passFish = (level: number) => SEASON_PASS.slice(0, level).reduce((n, r) => n + ('fish' in r ? r.fish : 0), 0);
-      const paid = 20 + (p.tasks[1].done ? 30 : 0) + passFish(p.season.level);
+      const paid = runFish + 20 + (p.tasks[1].done ? 30 : 0) + passFish(p.season.level);
       assert.equal(p.fish, paid);
       assert.equal((await profile(120)).fish, paid, 'a task pays once');
       assert.ok(p.season.points >= r1.points + r2.points);
@@ -418,7 +421,7 @@ for (const [name, makeStore] of stores) {
       assert.equal((await profile(130)).season.level, 0);
       await store.upsertUser(130, 'P130');
       const run = await store.createRun(130, { seed: 1, mode: 'free' });
-      await store.finishRun(run.id, { won: true, ticks: cats.RUN_TICKS, kills: 900, level: 30, points: 200 }, AFK);
+      await store.finishRun(run.id, { won: true, ticks: cats.RUN_TICKS, kills: 900, level: 30, points: 200, fish: 0 }, AFK);
       const p = await profile(130);
       assert.equal(p.season.points, 200);
       assert.equal(p.season.level, 10);
@@ -477,7 +480,7 @@ for (const [name, makeStore] of stores) {
       assert.equal((await post(180, '/api/runs', { room: 'yard' })).statusCode, 422);
       assert.equal((await post(180, '/api/runs', { room: 'moon' })).statusCode, 400);
       const won = await store.createRun(180, { seed: 1, mode: 'free' });
-      await store.finishRun(won.id, { won: true, ticks: cats.RUN_TICKS, kills: 900, level: 30, points: 42 }, AFK);
+      await store.finishRun(won.id, { won: true, ticks: cats.RUN_TICKS, kills: 900, level: 30, points: 42, fish: 0 }, AFK);
       assert.deepEqual(await rooms(180), [['flat', true], ['yard', true], ['warehouse', false]]);
       const { run } = await start(180, { room: 'yard' });
       assert.equal(run.room, 'yard');
@@ -488,6 +491,36 @@ for (const [name, makeStore] of stores) {
       const duel = await start(181, { mode: 'duel', duel: shared.duel.code });
       assert.equal(duel.run.room, 'yard', 'a friend plays the challenger’s room even before opening it');
       assert.equal(duel.ghost.room, 'yard');
+    });
+
+    test('Power Ups: bought for fish with rising prices, refunded, kept by the run and its replay', async () => {
+      const shop = (item: string) => post(190, '/api/shop/buy', { item });
+      assert.equal((await shop('power:might')).statusCode, 422, 'no fish yet');
+      await store.claimTask(190, '2026-01-01', 'gift', 1000);
+      let p = (await shop('power:might')).json().profile;
+      assert.deepEqual(p.powers, { might: 1 });
+      assert.equal(p.powerSpent, 40);
+      p = (await shop('power:might')).json().profile;
+      assert.equal(p.powerSpent, 40 + 88, 'level 2 costs 2 × 40, plus 10% for the level bought before');
+      p = (await shop('power:revive')).json().profile;
+      assert.equal(p.powerSpent, 40 + 88 + 600);
+      assert.equal((await shop('power:revive')).statusCode, 422, 'at its maximum');
+      assert.equal((await shop('power:wings')).statusCode, 404);
+      const fish = p.fish;
+
+      const { run } = await start(190);
+      assert.deepEqual(run.powers, { might: 2, revive: 1 });
+      const bot = cats.playBot(run.seed, cats.BOT_STYLES.mixed, cats.BOT_SKILLS.casual, { powers: run.powers });
+      offset = 3600 * 1000;
+      const body = await finish(190, run.id, bot.record());
+      offset = 0;
+      assert.equal(body.result.kills, bot.run.kills, 'the replay uses the Power Ups the run started with');
+      assert.equal(body.result.fish, bot.run.fish);
+
+      const before = (await get(190, '/api/profile')).json().profile.fish;
+      assert.ok(before >= fish + bot.run.fish, 'the run paid its fish');
+      p = (await post(190, '/api/shop/refund')).json().profile;
+      assert.deepEqual([p.powers, p.powerSpent, p.fish], [{}, 0, before + 728]);
     });
 
     test('the runs page replays finished runs for the owner', async () => {

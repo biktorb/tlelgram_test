@@ -399,3 +399,52 @@ export function unlockText(id: HeroId): string {
   if ('surviveMin' in u) return `продержаться ${u.surviveMin} минут`;
   return `победить ${u.kills} врагов за все забеги`;
 }
+
+// Power Ups, as in VS: permanent bonuses bought with fish between runs. A run
+// keeps the levels it started with, so replays use them too.
+export interface PowerDef {
+  name: string;
+  desc: string; // per level
+  max: number;
+  base: number; // fish for level 1
+}
+
+export const POWERS = {
+  might: { name: 'Сила', desc: '+5% урона', max: 5, base: 40 },
+  armor: { name: 'Броня', desc: '−1 к полученному урону', max: 3, base: 60 },
+  maxHp: { name: 'Здоровье', desc: '+10% здоровья', max: 3, base: 30 },
+  recovery: { name: 'Регенерация', desc: '+0,1 здоровья в секунду', max: 5, base: 40 },
+  move: { name: 'Скорость', desc: '+5% скорости кота', max: 2, base: 50 },
+  area: { name: 'Область', desc: '+5% области атак', max: 2, base: 60 },
+  cooldown: { name: 'Перезарядка', desc: '−2,5% перезарядки', max: 2, base: 90 },
+  magnet: { name: 'Магнит', desc: '+25% радиуса сбора', max: 2, base: 30 },
+  luck: { name: 'Удача', desc: '+10% удачи', max: 3, base: 60 },
+  growth: { name: 'Рост', desc: '+3% опыта', max: 5, base: 90 },
+  greed: { name: 'Жадность', desc: '+10% рыбок за забег', max: 5, base: 30 },
+  reroll: { name: 'Реролл', desc: '+1 реролл за забег', max: 3, base: 100 },
+  revive: { name: 'Девятая жизнь', desc: 'одно воскрешение с половиной здоровья', max: 1, base: 500 },
+} satisfies Record<string, PowerDef>;
+export type PowerId = keyof typeof POWERS;
+export const POWER_IDS = Object.keys(POWERS) as PowerId[];
+export const isPower = (id: unknown): id is PowerId => typeof id === 'string' && Object.hasOwn(POWERS, id);
+export type Powers = Partial<Record<PowerId, number>>;
+
+// The next level costs base × that level, plus 10% for every level of any
+// Power Up bought before, as in VS.
+export function powerPrice(id: PowerId, powers: Powers): number {
+  const bought = POWER_IDS.reduce((n, p) => n + (powers[p] ?? 0), 0);
+  return Math.round(POWERS[id].base * ((powers[id] ?? 0) + 1) * (1 + 0.1 * bought));
+}
+
+// Keeps only known Power Ups within their levels, for levels read from outside.
+export function cleanPowers(x: unknown): Powers {
+  const out: Powers = {};
+  if (!x || typeof x !== 'object') return out;
+  for (const [k, v] of Object.entries(x)) {
+    if (isPower(k) && Number.isInteger(v) && (v as number) > 0) out[k] = Math.min(v as number, POWERS[k].max);
+  }
+  return out;
+}
+
+// Fish a run pays out, with the Greed bonus.
+export const runFish = (fish: number, powers: Powers): number => Math.round(fish * (1 + 0.1 * (powers.greed ?? 0)));

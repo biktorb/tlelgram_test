@@ -6,7 +6,7 @@ import type { RunRecord } from './store.ts';
 export type RunResult = ReturnType<cats.CatRun['result']>;
 // Replays a record and returns what the run achieved; throws on a bad record.
 // The cat and the room the run was played with.
-export type RunSetup = { hero?: cats.HeroId; room?: cats.RoomId };
+export type RunSetup = { hero?: cats.HeroId; room?: cats.RoomId; powers?: cats.Powers };
 export type Replayer = (seed: number, rec: RunRecord, setup?: RunSetup) => Promise<RunResult>;
 
 // In the same thread: for tests and the in-memory dev server.

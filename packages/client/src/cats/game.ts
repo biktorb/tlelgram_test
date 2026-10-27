@@ -24,6 +24,8 @@ export interface GameOptions {
   hero?: cats.HeroId; // the player's cat
   ghostHero?: cats.HeroId; // the cat the ghost played
   room?: cats.RoomId; // the ghost plays the same room
+  powers?: cats.Powers; // the player's Power Ups
+  ghostPowers?: cats.Powers;
 }
 
 interface Particle {
@@ -73,8 +75,8 @@ class Ghost {
   private picks: string;
   private i = 0;
   private pick = 0;
-  constructor(seed: number, rec: RunRecord, hero?: cats.HeroId, room?: cats.RoomId) {
-    this.run = new CatRun(seed, { events: false, hero, room });
+  constructor(seed: number, rec: RunRecord, hero?: cats.HeroId, room?: cats.RoomId, powers?: cats.Powers) {
+    this.run = new CatRun(seed, { events: false, hero, room, powers });
     this.dirs = decodeMoves(rec.moves);
     this.picks = rec.picks;
   }
@@ -173,9 +175,9 @@ export class Game {
     this.cv = cv;
     this.ctx = cv.getContext('2d')!;
     this.hooks = hooks;
-    const { hero, room } = opts;
-    this.rec = opts.progress ? resume(seed, opts.progress, { hero, room }) : new Recorder(new CatRun(seed, { hero, room }));
-    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost, opts.ghostHero, room) : null;
+    const { hero, room, powers } = opts;
+    this.rec = opts.progress ? resume(seed, opts.progress, { hero, room, powers }) : new Recorder(new CatRun(seed, { hero, room, powers }));
+    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost, opts.ghostHero, room, opts.ghostPowers) : null;
     // The ghost catches up with a continued run: one ghost step per tick played.
     for (let i = 0; i < this.run.tick; i++) this.ghost?.step();
     this.prevPlayer = [this.run.player.x, this.run.player.y];
@@ -379,6 +381,11 @@ export class Game {
       case 'boss':
         this.text(this.run.player.x, this.run.player.y - 70, BOSS_TEXT[this.run.room][0], '#ff6b6b', 30);
         this.shake = 12;
+        break;
+      case 'revive':
+        this.text(this.run.player.x, this.run.player.y - 70, 'Девятая жизнь!', '#ffd166', 26, 2);
+        this.burst(this.run.player.x, this.run.player.y, 30, '#ffd166');
+        this.shake = 10;
         break;
       case 'cleaner':
         this.text(this.run.player.x, this.run.player.y - 70, '20:00! Пришла Уборщица, беги!', '#ff6b6b', 22, 2.5);
