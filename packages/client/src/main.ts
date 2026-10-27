@@ -359,6 +359,7 @@ async function shareRun(to: 'chat' | 'story' = 'chat'): Promise<void> {
     }
     const wins = run.s.wins;
     const boast = wins > 0 ? `Я набрал ${wins} ${plural(wins, 'победу', 'победы', 'побед')} в «Отряде»` : 'Я собрал отряд в «Отряде»';
+    backend.track(to === 'story' ? 'share_story' : 'share_chat');
     if (to === 'story') shareStory(new URL('story.jpg', location.href).href, `${boast} 🐱⚔️ Побей мой отряд: ${link}`);
     else shareLink(link, `${boast} 🐱⚔️ Сможешь победить моих котов?`);
   } catch (e) {
@@ -433,6 +434,7 @@ function answersList(): HTMLElement | null {
 
 function renderStore(): void {
   if (!profile) return render();
+  if (hasDuels(backend) && app.querySelector('.store') === null) backend.track('open_store');
   const p = profile;
   setBack(render);
   const task = (t: Profile['tasks'][number]) =>

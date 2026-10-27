@@ -9,6 +9,7 @@ export interface Config {
   initDataMaxAgeSec: number;
   appLink: string | null; // the Mini App's t.me link, for duel invitations
   telegramApi: string; // Bot API base URL; a relay when the server's network blocks Telegram
+  adminKey: string | null; // opens /api/admin/stats; null turns it off
 }
 
 const TELEGRAM_API = 'https://api.telegram.org';
@@ -25,7 +26,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     initDataMaxAgeSec: Number(env.INIT_DATA_MAX_AGE ?? 86400),
     appLink: env.TELEGRAM_APP_LINK?.replace(/\/$/, '') || null,
     telegramApi: env.TELEGRAM_API_BASE?.replace(/\/$/, '') || TELEGRAM_API,
+    adminKey: env.ADMIN_KEY || null,
   };
+  if (config.adminKey && config.adminKey.length < 16) {
+    console.warn('ADMIN_KEY must be at least 16 characters; the stats page is off');
+    config.adminKey = null;
+  }
   if (!/^https:\/\/[^/\s]+$/.test(config.telegramApi)) {
     console.warn('TELEGRAM_API_BASE must look like https://<host>; using api.telegram.org');
     config.telegramApi = TELEGRAM_API;

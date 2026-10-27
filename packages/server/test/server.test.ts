@@ -7,6 +7,7 @@ import { loadConfig, type Config } from '../src/config.ts';
 import { dailySeed, dayOf, leagueMove, seedGhosts, weekOf, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
+import { computeStats, type GameEvent } from '../src/stats.ts';
 
 const TOKEN = '123456:TEST-token';
 
@@ -21,6 +22,7 @@ const config: Config = {
   initDataMaxAgeSec: 3600,
   appLink: 'https://t.me/otryad_bot/play',
   telegramApi: 'https://api.telegram.org',
+  adminKey: 'test-admin-key-0123456789',
 };
 
 function initData(userId: number, name = 'Маша', authDate = Math.floor(Date.now() / 1000)): string {
@@ -74,6 +76,38 @@ describe('config', () => {
     assert.equal(loadConfig(env).telegramApi, 'https://api.telegram.org');
     assert.equal(loadConfig({ ...env, TELEGRAM_API_BASE: 'https://tg.example.workers.dev/' }).telegramApi, 'https://tg.example.workers.dev');
     assert.equal(loadConfig({ ...env, TELEGRAM_API_BASE: 'http://insecure.example' }).telegramApi, 'https://api.telegram.org');
+  });
+});
+
+describe('closed-test stats', () => {
+  const day = (d: string, hm = '12:00') => Date.parse(`${d}T${hm}:00+03:00`);
+  const ev = (userId: number, name: string, at: number, data: Record<string, unknown> | null = null): GameEvent => ({ userId, name, at, data });
+
+  test('retention, minutes and share rate', () => {
+    const events = [
+      // Player 1 came on the 1st, back on the 2nd and on the 8th.
+      ev(1, 'open', day('2030-03-01')),
+      ev(1, 'run_start', day('2030-03-01', '12:01')),
+      ev(1, 'run_end', day('2030-03-01', '12:09'), { wins: 4, duel: false }),
+      ev(1, 'duel_share', day('2030-03-01', '12:10')),
+      ev(1, 'open', day('2030-03-02')),
+      ev(1, 'open', day('2030-03-08')),
+      // Player 2 came on the 1st only; a long pause does not count as play.
+      ev(2, 'open', day('2030-03-01')),
+      ev(2, 'run_start', day('2030-03-01', '12:02')),
+      ev(2, 'run_end', day('2030-03-01', '18:00'), { wins: 1, duel: false }),
+      // Player 3 came on the 9th and answered a duel.
+      ev(3, 'run_start', day('2030-03-09')),
+      ev(3, 'run_end', day('2030-03-09', '12:06'), { wins: 2, duel: true }),
+    ];
+    const s = computeStats(events, day('2030-03-10'), 10);
+    assert.deepEqual(s.retention.d1, { of: 2, hit: 1, rate: 0.5 }, 'today is not over, so player 3 is not counted yet');
+    assert.deepEqual(s.retention.d7, { of: 2, hit: 1, rate: 0.5 }, 'player 3 is too new for D7');
+    assert.deepEqual(s.shareRate, { of: 3, hit: 2, rate: 0.667 });
+    const first = s.days.find((d) => d.date === '2030-03-01')!;
+    assert.deepEqual(first, { date: '2030-03-01', activeUsers: 2, newUsers: 2, runsStarted: 2, runsFinished: 2, shares: 1 });
+    assert.equal(s.days[0].date, '2030-03-10');
+    assert.equal(s.minutesPerActiveDay, 2, 'median of 2, 2 and 0 minutes on days with a run');
   });
 });
 
@@ -492,6 +526,22 @@ for (const [name, makeStore] of stores) {
       assert.equal((await profile(130)).fish, p.fish, 'levels pay once');
       const equip = await app.inject({ method: 'POST', url: '/api/shop/equip', headers: auth(130), payload: { item: 'crown' } });
       assert.equal(equip.json().profile.frame, 'crown');
+    });
+
+    test('events are recorded and the stats page needs the admin key', async () => {
+      const ok = await app.inject({ method: 'POST', url: '/api/events', headers: auth(140), payload: { name: 'share_story' } });
+      assert.equal(ok.statusCode, 204);
+      const bad = await app.inject({ method: 'POST', url: '/api/events', headers: auth(140), payload: { name: 'drop_table' } });
+      assert.equal(bad.statusCode, 400);
+      assert.equal((await app.inject({ method: 'GET', url: '/api/admin/stats' })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'GET', url: '/api/admin/stats?key=wrong' })).statusCode, 404);
+      assert.equal((await app.inject({ method: 'GET', url: `/api/admin/stats?key=${config.adminKey}` })).statusCode, 200);
+      const res = await app.inject({ method: 'GET', url: '/api/admin/stats?days=3', headers: { 'x-admin-key': config.adminKey! } });
+      assert.equal(res.statusCode, 200);
+      const stats = res.json();
+      assert.equal(stats.days.length, 3);
+      assert.ok(stats.days[0].runsStarted > 0, 'runs from earlier tests are counted');
+      assert.ok(stats.days[0].shares > 0);
     });
 
     test('ordinary runs have no duel battle', async () => {

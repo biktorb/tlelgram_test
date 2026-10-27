@@ -1,4 +1,5 @@
 import type { BattleResult, RunState, Unit } from '@otryad/core';
+import type { GameEvent } from './stats.ts';
 
 export type GhostUnit = Omit<Unit, 'uid'>;
 
@@ -150,6 +151,8 @@ export interface Store {
   // Spends fish on an item unless the player owns it or is short of fish.
   buyItem(userId: number, item: string, price: number): Promise<BuyResult>;
   setFrame(userId: number, frame: string | null): Promise<void>;
+  addEvent(userId: number, name: string, data?: Record<string, unknown> | null): Promise<void>;
+  eventsSince(since: Date): Promise<GameEvent[]>;
   close(): Promise<void>;
 }
 
@@ -166,6 +169,7 @@ export function closestGhost<T extends { wins: number }>(rows: T[], wins: number
 export class MemoryStore implements Store {
   private users = new Map<number, { firstName: string; username?: string; fish: number; frame: string | null; items: Set<string> }>();
   private claims = new Map<string, number>(); // "user:day:task" -> reward
+  private events: GameEvent[] = [];
   private runs = new Map<string, StoredRun & { chatInstance: string | null; updatedAt: number }>();
   private ghosts: { round: number; wins: number; userId: number | null; name: string; team: GhostUnit[]; frame: string | null }[] = [];
   private duels = new Map<string, Duel>();
@@ -374,6 +378,14 @@ export class MemoryStore implements Store {
   async setFrame(userId: number, frame: string | null): Promise<void> {
     const u = this.users.get(userId);
     if (u) u.frame = frame;
+  }
+
+  async addEvent(userId: number, name: string, data: Record<string, unknown> | null = null): Promise<void> {
+    this.events.push({ userId, name, data, at: Date.now() });
+  }
+
+  async eventsSince(since: Date): Promise<GameEvent[]> {
+    return this.events.filter((e) => e.at >= since.getTime());
   }
 
   async close(): Promise<void> {}

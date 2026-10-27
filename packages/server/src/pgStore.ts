@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import type { RunState } from '@otryad/core';
+import type { GameEvent } from './stats.ts';
 import {
   closestGhost,
   GHOST_CANDIDATES,
@@ -353,8 +354,20 @@ export class PgStore implements Store {
     await this.pool.query('UPDATE users SET frame = $2 WHERE id = $1', [userId, frame]);
   }
 
+  async addEvent(userId: number, name: string, data: Record<string, unknown> | null = null): Promise<void> {
+    await this.pool.query('INSERT INTO events (user_id, name, data) VALUES ($1, $2, $3)', [userId, name, data]);
+  }
+
+  async eventsSince(since: Date): Promise<GameEvent[]> {
+    const { rows } = await this.pool.query<{ user_id: string; name: string; data: Record<string, unknown> | null; at: Date }>(
+      'SELECT user_id, name, data, at FROM events WHERE at >= $1 ORDER BY at',
+      [since],
+    );
+    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, data: r.data, at: r.at.getTime() }));
+  }
+
   async reset(): Promise<void> {
-    await this.pool.query('TRUNCATE task_claims, user_items, league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
+    await this.pool.query('TRUNCATE events, task_claims, user_items, league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
   }
 
   async close(): Promise<void> {
