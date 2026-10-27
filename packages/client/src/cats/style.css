@@ -148,6 +148,23 @@ html, body {
 .evos { display: flex; flex-direction: column; gap: 4px; max-width: 340px; font-size: 13px; color: var(--muted); text-align: left; }
 .evos b { color: var(--ink); text-align: center; }
 .evos .done { color: var(--accent); font-weight: 800; }
+/* Damage per weapon, as on the VS pause screen. */
+.dmg { display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 3px 10px; width: min(340px, 100%); font-size: 13px; text-align: right; align-items: center; }
+.dmg .head { color: var(--muted); font-size: 11px; }
+.dmg .head:first-child, .dmg .name { text-align: left; }
+.dmg .name { display: flex; align-items: center; gap: 4px; font-weight: 800; min-width: 0; }
+.dmg .name .ico { width: 20px; height: 20px; }
+.dmg .name .ico.emoji { font-size: 16px; line-height: 20px; }
+/* The collection. */
+.panel h2 { font-size: 17px; margin: 10px 0 2px; }
+.coll { align-items: flex-start; }
+.coll.new { opacity: 0.7; }
+.coll .nums { font-size: 12px; }
+.recipe { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 14px; }
+.recipe .ico { width: 22px; height: 22px; }
+.recipe .ico.emoji { font-size: 18px; line-height: 22px; }
+.recipe b { color: var(--muted); }
+.recipe b.got { color: var(--accent); }
 
 /* The cat list. */
 .btn.small { padding: 8px 12px; font-size: 15px; border-radius: 12px; }

@@ -27,6 +27,7 @@ interface Saved {
   last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId; room?: RoomId; powers?: cats.Powers };
   hero?: HeroId; // the cat picked for the next run
   room?: RoomId; // and the room
+  found?: string[]; // items and evolutions met in runs, for the collection
 }
 function load(): Saved {
   try {
@@ -179,6 +180,7 @@ function menu(): void {
   pick.append(
     button(`🐱 ${hero.name}`, 'btn secondary small', () => heroScreen()),
     button(`🏠 ${cats.ROOMS[chosenRoom()].name}`, 'btn secondary small', () => roomScreen()),
+    button('📖 Коллекция', 'btn secondary small', () => collectionScreen()),
   );
   box.append(pick);
   const buttons = h('div', 'buttons');
@@ -361,6 +363,81 @@ function evolutionList(run: CatRun): HTMLElement {
   return list;
 }
 
+// What each weapon has done this run, like the VS pause screen: level,
+// damage, how long the cat has had it and damage per second.
+function damageTable(run: CatRun): HTMLElement {
+  const table = h('div', 'dmg');
+  table.append(h('b', 'head', 'Оружие'), h('b', 'head', 'ур.'), h('b', 'head', 'урон'), h('b', 'head', 'время'), h('b', 'head', 'в сек.'));
+  const rows = run.weapons().sort((a, b) => (run.damage[b] ?? 0) - (run.damage[a] ?? 0));
+  for (const w of rows) {
+    const dmg = Math.round(run.damage[w] ?? 0);
+    const held = Math.max(1, run.tick - (run.since[w] ?? 0));
+    const name = h('span', 'name');
+    name.append(icon(w, 20), h('span', '', run.evolved[w] ? cats.EVOLUTIONS[w].name : cats.WEAPONS[w].name));
+    table.append(
+      name,
+      h('span', '', run.evolved[w] ? '★' : String(run.lvl(w))),
+      h('span', '', dmg.toLocaleString('ru-RU')),
+      h('span', '', mmss(held)),
+      h('span', '', ((dmg * TICK_RATE) / held).toFixed(1)),
+    );
+  }
+  return table;
+}
+
+// Remembers what this run met, so the collection can mark it.
+function remember(run: CatRun): void {
+  const s = load();
+  const found = new Set(s.found ?? []);
+  for (const k of Object.keys(run.items)) found.add(k);
+  for (const w of Object.keys(run.evolved)) found.add(`evo:${w}`);
+  s.found = [...found];
+  save(s);
+}
+
+// Every weapon and passive and what they evolve into, like the VS collection.
+function collectionScreen(): void {
+  stopGame();
+  setBack(() => menu());
+  const found = new Set(load().found ?? []);
+  const body = h('div', 'panel');
+  body.append(
+    h('p', '', `Оружие растёт до ${cats.WEAPON_MAX} уровня. Оружие ${cats.WEAPON_MAX} уровня вместе с нужной пассивкой превращается в эволюцию из сундука элиты или босса.`),
+    h('h2', '', 'Оружие и эволюции'),
+  );
+  for (const w of cats.WEAPON_IDS) {
+    const def = cats.WEAPONS[w];
+    const evo = cats.EVOLUTIONS[w];
+    const card = h('div', `herocard coll${found.has(w) ? '' : ' new'}`);
+    const text = h('div', 'text');
+    const b = def.base;
+    text.append(
+      h('b', '', def.name),
+      h('span', '', def.desc[0]),
+      h('span', 'nums', `Урон ${b.dmg} · перезарядка ${b.cd} с · снарядов ${b.amount}`),
+    );
+    const recipe = h('div', 'recipe');
+    recipe.append(icon(w, 22), h('span', '', '+'), icon(evo.passive, 22), h('span', '', '→'), h('b', found.has(`evo:${w}`) ? 'got' : '', `★ ${evo.name}`));
+    text.append(recipe, h('span', '', evo.desc));
+    card.append(icon(w), text);
+    body.append(card);
+  }
+  body.append(h('h2', '', 'Пассивки'));
+  for (const id of cats.PASSIVE_IDS) {
+    const def = cats.PASSIVES[id];
+    const card = h('div', `herocard coll${found.has(id) ? '' : ' new'}`);
+    const text = h('div', 'text');
+    const evolves = cats.WEAPON_IDS.filter((w) => cats.EVOLUTIONS[w].passive === id);
+    text.append(h('b', '', def.name), h('span', '', `${def.desc}, до ${def.max} уровня`));
+    if (evolves.length) text.append(h('span', 'nums', `Нужна для: ${evolves.map((w) => cats.EVOLUTIONS[w].name).join(', ')}`));
+    card.append(icon(id), text);
+    body.append(card);
+  }
+  const box = overlay(h('h1', '', 'Коллекция'), body, button('Назад', 'btn secondary', () => menu()));
+  box.classList.add('page');
+  ui.replaceChildren(box);
+}
+
 function pauseMenu(): void {
   if (!game || game.run.over || ui.querySelector('.overlay:not(.level)')) return;
   game.setPaused(true);
@@ -374,7 +451,7 @@ function pauseMenu(): void {
     button('Выйти в меню', 'btn secondary', () => menu()),
   );
   if (serverRun) box.append(h('p', '', 'Забег сохранён, его можно продолжить позже.'));
-  box.append(evolutionList(game.run));
+  box.append(damageTable(game.run), evolutionList(game.run));
   ui.append(box);
 }
 
@@ -386,6 +463,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   if (better) s.best = mine;
   s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero, room: run.room, powers: run.powers };
   save(s);
+  remember(run);
 
   const playedRun = serverRun;
   let server: Finished | null = null;
@@ -407,7 +485,8 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     vs = run.tick > ghostTicks || (run.won && !ghost.won) ? 'Ты пережил призрака!' : run.won && ghost.won ? 'Оба выстояли' : 'Призрак продержался дольше';
   }
   const ups = h('div', 'ups');
-  for (const [k, l] of Object.entries(run.items) as [ItemId, number][]) {
+  for (const k of run.passives()) {
+    const l = run.lvl(k);
     const u = h('span', 'up');
     u.append(icon(k, 26), h('b', '', String(l)));
     ups.append(u);
@@ -423,7 +502,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   if (server?.daily?.rank) box.append(h('p', 'best', `Вызов дня: ${server.daily.rank} место`));
   else if (better) box.append(h('p', 'best', 'Новый рекорд!'));
   if (error) box.append(h('p', 'error', error));
-  box.append(ups);
+  box.append(damageTable(run), ups);
   const buttons = h('div', 'buttons');
   if (server && playedRun && api) {
     buttons.append(
