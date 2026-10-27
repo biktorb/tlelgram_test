@@ -92,23 +92,46 @@ class Ghost {
   }
 }
 
-const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = {
-  mouse: 'mouse',
-  dust: 'dust',
-  robot: 'vacuum',
-  bigrobot: 'vacuum',
-  mop: 'boss',
-  pigeon: 'pigeon',
-  dog: 'dog',
-  mower: 'mower',
-  bulldog: 'bulldog',
-  blower: 'blower',
-  hose: 'hose',
-  washer: 'washer',
-  minibot: 'minibot',
-  industrial: 'industrial',
-  king: 'king',
-  cleaner: 'cleaner',
+// The picture of each kind, and a colour over it for the kinds that share one.
+const ENEMY_SPRITE: Record<cats.EnemyKind, [SpriteId, string?]> = {
+  mouse: ['mouse'],
+  redmouse: ['mouse', '#e0303a'],
+  dust: ['dust'],
+  mite: ['dust', '#8a4fc9'],
+  moth: ['pigeon', '#f2ecd0'],
+  robot: ['vacuum'],
+  wetbot: ['vacuum', '#3fae5a'],
+  rat: ['mouse', '#4a4a55'],
+  brush: ['washer', '#e07a1f'],
+  bigvac: ['industrial', '#9b2c2c'],
+  bigrobot: ['vacuum', '#d4a017'],
+  mop: ['boss'],
+  pigeon: ['pigeon'],
+  crow: ['pigeon', '#1f1f2a'],
+  dog: ['dog'],
+  trimmer: ['mower', '#d9452b'],
+  wasp: ['pigeon', '#f2c21b'],
+  mower: ['mower'],
+  tractor: ['mower', '#2f8a3a'],
+  goose: ['pigeon', '#ffffff'],
+  hound: ['bulldog', '#5a3d22'],
+  combine: ['blower', '#c97a1f'],
+  bulldog: ['bulldog'],
+  blower: ['blower'],
+  minibot: ['minibot'],
+  redbot: ['minibot', '#e0303a'],
+  hose: ['hose'],
+  scrubber: ['washer', '#2aa5a0'],
+  drone: ['minibot', '#3a7bd5'],
+  washer: ['washer'],
+  steamer: ['washer', '#f4f4f4'],
+  roller: ['minibot', '#f08a24'],
+  cyclone: ['industrial', '#7b3fc9'],
+  tank: ['industrial', '#55606e'],
+  industrial: ['industrial'],
+  king: ['king'],
+  wall: ['dust', '#5a4a3a'],
+  cleaner: ['cleaner'],
 };
 // The floor of each room: two checker colours and the line between tiles.
 const FLOORS: Record<cats.RoomId, [string, string, string]> = {
@@ -463,10 +486,10 @@ export class Game {
     this.ctx.drawImage(catSprite(hero, px, flip), x - size / 2, y - size / 2, size, size);
   }
 
-  private blit(id: SpriteId, x: number, y: number, size: number, flip = false, flash = false): void {
+  private blit(id: SpriteId, x: number, y: number, size: number, flip = false, flash = false, tint?: string): void {
     const c = this.ctx;
     const px = size * this.zoom * this.dpr;
-    const img = flash ? flashSprite(id, px, flip) : sprite(id, px, flip);
+    const img = flash ? flashSprite(id, px, flip) : sprite(id, px, flip, tint);
     c.drawImage(img, x - size / 2, y - size / 2, size, size);
   }
 
@@ -685,7 +708,8 @@ export class Game {
       const size = e.r * 2.3;
       // Charging robots face where they drive.
       const flip = e.kind === 'robot' ? e.vx > 0 : x > px;
-      this.blit(ENEMY_SPRITE[e.kind], x, y + wob, size, flip, run.tick - e.hitTick < 3);
+      const [id, tint] = ENEMY_SPRITE[e.kind];
+      this.blit(id, x, y + wob, size, flip, run.tick - e.hitTick < 3, tint);
       if (e.hp < e.maxHp && (e.elite || e.kind === 'robot')) {
         const w = e.r * 2;
         c.fillStyle = 'rgba(0,0,0,.45)';

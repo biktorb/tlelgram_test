@@ -560,7 +560,7 @@ function roomScreen(): void {
         const def = cats.ROOMS[info.id];
         const card = h('div', `herocard${info.id === chosen ? ' on' : ''}`);
         const text = h('div', 'text');
-        const enemies = [...new Set(def.waves.flatMap((w) => Object.keys(w.mix)))].slice(0, 3) as cats.EnemyKind[];
+        const enemies = [...new Set(def.waves.flatMap((w) => w.kinds))].slice(0, 4);
         text.append(
           h('b', '', def.name),
           h('span', '', `Враги: ${enemies.map((k) => cats.ENEMIES[k].name).join(', ')}`),

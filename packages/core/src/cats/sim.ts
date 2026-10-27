@@ -59,17 +59,11 @@ const SCREEN_Y = 460;
 // hitboxes of VS: a mouse that just brushes the cat while it turns misses.
 const CONTACT = 0.8;
 
+// Enemies keep their strength all run, as in VS: what gets harder is which
+// kinds come and how many (the wave table in content.ts).
 export const BALANCE = {
-  hpPerMin: 0.15, // enemy health grows by this share every minute
-  hpPerMin2: 0.11, // and by this share every minute squared, to keep up with upgrades
-  crowdScale: 1.3, // multiplies the fewest enemies of every minute (CROWD)
-  burstEvery: 1.2, // seconds between extra spawns
-  speedPerMin: 0.025, // enemies get this much faster every minute, up to 15
-  xpPerMin: 0.15, // gems grow by this share every minute, as levels get dearer
+  crowd: 1, // multiplies the fewest enemies of every minute
 };
-
-// The fewest enemies around the cat in each minute, after Mad Forest.
-const CROWD = [15, 30, 50, 45, 40, 40, 60, 80, 100, 90, 100, 160, 150, 160, 180, 200, 220, 240, 220, 260];
 
 // Joystick direction: 0 is "stand still", 1..16 point around the circle
 // starting from the right and going clockwise on screen (y grows down).
@@ -118,6 +112,8 @@ export interface Enemy {
   meowTick: number; // and the meow aura
   timer: number; // dogs: ticks of the dash left (> 0) or until the next (< 0)
   leader: number; // a hose segment follows this enemy; 0 for the head
+  swarm: boolean; // flies straight across in a swarm
+  life: number; // ticks until it goes away by itself (the wall); 0 is never
 }
 
 // Things enemies leave behind: slippery water from washers slows the cat,
@@ -134,6 +130,10 @@ export interface Hazard {
 }
 
 const FLOCK = 5; // pigeons in a flock
+const SWARM = 8; // in one group of a swarm
+const SWARM_SPEED = 450; // 700 in VS
+const WALL = 36; // enemies in the closing ring
+const WALL_RADIUS = 430;
 const HOSE = 6; // segments in a hose
 const PUDDLE_SLOW = 0.55;
 const LEAF_DMG = 10;
@@ -287,7 +287,9 @@ export class CatRun {
   private nextId = 1;
   // Projectiles of attacks still to leave.
   private volleys: { id: WeaponId; i: number; n: number; at: number; a: number }[] = [];
-  private burstAcc = 0;
+  private swarmLeft = 0;
+  private swarmNext = 0;
+  private swarmGhost = false;
   private cd: Partial<Record<WeaponId, number>> = {};
   private sepKeys = new Float64Array(MAX_ENEMIES + 64);
   private sepHead = new Int32Array(1024);
@@ -447,10 +449,7 @@ export class CatRun {
     for (let i = 0; i < 8 && !this.map.inside(this.player.x + dcos(a) * SPAWN_DISTANCE, this.player.y + dsin(a) * SPAWN_DISTANCE); i++) {
       a = this.rng.next() * Math.PI * 2;
     }
-    const m = this.time / 60;
-    const boss = kind === ROOMS[this.room].boss;
-    const scale = boss ? 1 : 1 + m * BALANCE.hpPerMin + m * m * BALANCE.hpPerMin2;
-    const hp = def.hp * scale;
+    const hp = def.hp;
     const x = this.player.x + dcos(a) * SPAWN_DISTANCE;
     const y = this.player.y + dsin(a) * SPAWN_DISTANCE;
     const en: Enemy = {
@@ -461,10 +460,9 @@ export class CatRun {
       r: def.r,
       hp,
       maxHp: hp,
-      // The first minutes are slow enough to turn, hit and run; later ones are not.
-      speed: kind === 'cleaner' || boss ? def.speed : def.speed * (1 + Math.min(m, 15) * BALANCE.speedPerMin),
+      speed: def.speed,
       dmg: def.dmg,
-      xp: elite ? 60 * (1 + m) : def.xp * (1 + m * BALANCE.xpPerMin),
+      xp: elite ? 60 * (1 + this.time / 60) : def.xp,
       kx: 0,
       ky: 0,
       vx: 0,
@@ -476,6 +474,8 @@ export class CatRun {
       meowTick: 0,
       timer: 0,
       leader: 0,
+      swarm: false,
+      life: 0,
     };
     [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
     if (def.move === 'charge' || def.move === 'flock') this.aim(en);
@@ -527,18 +527,50 @@ export class CatRun {
     en.vy = dy / d;
   }
 
-  private pickKind(): EnemyKind {
-    const minute = this.time / 60;
-    const waves = ROOMS[this.room].waves;
-    let mix = waves[0].mix;
-    for (const w of waves) if (minute >= w.from) mix = w.mix;
-    let r = this.rng.next();
-    const kinds = Object.keys(mix) as EnemyKind[];
-    for (const k of kinds) {
-      r -= mix[k]!;
-      if (r < 0) return k;
+  // One of each kind of the wave; returns how many came.
+  private batch(kinds: EnemyKind[]): number {
+    let n = 0;
+    for (const k of kinds) if (this.enemies.length < MAX_ENEMIES) n += this.spawnGroup(k);
+    return n;
+  }
+
+  // A swarm group: comes from one side of the screen and flies straight
+  // through where the cat is, too fast to outrun, then is gone.
+  private spawnSwarm(ghost: boolean): void {
+    const room = ROOMS[this.room];
+    const kind = ghost ? room.ghost : room.swarm;
+    const a = this.rng.next() * Math.PI * 2;
+    const ux = dcos(a);
+    const uy = dsin(a);
+    const off = (this.rng.next() - 0.5) * 300;
+    const cx = this.player.x - ux * SPAWN_DISTANCE - uy * off;
+    const cy = this.player.y - uy * SPAWN_DISTANCE + ux * off;
+    const n = ghost ? 5 : SWARM;
+    for (let i = 0; i < n && this.enemies.length < MAX_ENEMIES; i++) {
+      const e = this.spawn(kind);
+      e.x = cx + (this.rng.next() - 0.5) * 90;
+      e.y = cy + (this.rng.next() - 0.5) * 90;
+      e.vx = ux;
+      e.vy = uy;
+      e.swarm = true;
+      e.speed = SWARM_SPEED;
+      if (!ghost) {
+        // The swarm bats of VS: 1 health, 1 damage.
+        e.hp = e.maxHp = 1;
+        e.dmg = 1;
+      }
     }
-    return kinds[kinds.length - 1];
+  }
+
+  // The flower wall of Mad Forest: a ring around the cat that closes in.
+  private spawnWall(seconds: number): void {
+    for (let i = 0; i < WALL && this.enemies.length < MAX_ENEMIES; i++) {
+      const e = this.spawn('wall');
+      const a = (i / WALL) * Math.PI * 2;
+      [e.x, e.y] = this.place(this.player.x + dcos(a) * WALL_RADIUS, this.player.y + dsin(a) * WALL_RADIUS, e.r);
+      e.hp = e.maxHp = ENEMIES.wall.hp * this.level;
+      e.life = Math.round(seconds * TICK_RATE);
+    }
   }
 
   private spawner(): void {
@@ -551,28 +583,44 @@ export class CatRun {
       if ((this.tick - RUN_TICKS) % MINUTE_TICKS === 0) this.spawn('cleaner', true);
       return;
     }
-    // Keep a crowd around the cat, growing over the run.
-    const crowd = Math.round(CROWD[Math.min(CROWD.length - 1, Math.floor(this.time / 60))] * BALANCE.crowdScale);
-    let n = 0;
-    while (this.enemies.length < Math.min(crowd, MAX_ENEMIES) && n < 6) n += this.spawnGroup(this.pickKind());
-    // And small bursts on top of it.
-    this.burstAcc += DT;
-    if (this.burstAcc >= BALANCE.burstEvery) {
-      this.burstAcc -= BALANCE.burstEvery;
-      const size = 1 + Math.floor((this.time / 60) * 0.4);
-      const cap = Math.min(MAX_ENEMIES, crowd * 1.5);
-      for (let i = 0; i < size && this.enemies.length < cap; ) i += this.spawnGroup(this.pickKind());
-    }
     const room = ROOMS[this.room];
+    const minute = Math.floor(this.tick / MINUTE_TICKS);
+    const wave = room.waves[Math.min(room.waves.length - 1, minute)];
+    const at = this.tick % MINUTE_TICKS;
+    if (at === 0) {
+      // A new minute: its swarms and wall, if it has them.
+      this.swarmLeft = 0;
+      if (wave.swarm && this.rng.next() < wave.swarm.chance) {
+        this.swarmLeft = wave.swarm.count;
+        this.swarmNext = this.tick + Math.round(wave.swarm.at * TICK_RATE);
+        this.swarmGhost = !!wave.swarm.ghost;
+      }
+      if (wave.wall) this.spawnWall(wave.wall);
+    }
+    if (this.swarmLeft > 0 && this.tick >= this.swarmNext) {
+      this.swarmLeft--;
+      this.swarmNext = this.tick + Math.round(wave.swarm!.gap * TICK_RATE);
+      this.spawnSwarm(this.swarmGhost);
+    }
+    // One of each kind every few seconds, and more at once while there are
+    // fewer than the minute's least.
+    if (at % Math.max(1, Math.round((wave.every / room.crowd) * TICK_RATE)) === 0) this.batch(wave.kinds);
+    const min = Math.min(MAX_ENEMIES, Math.round(wave.min * room.crowd * BALANCE.crowd));
+    for (let n = 0; this.enemies.length < min && n < 6; ) {
+      const got = this.batch(wave.kinds);
+      if (!got) break;
+      n += got;
+    }
     if (ELITE_TICKS.includes(this.tick)) {
       const e = this.spawn(room.elite, true);
       e.hp = e.maxHp = ENEMIES[room.elite].hp * this.level; // like VS bosses: health times the cat's level
       this.emit({ t: 'elite' });
     }
     if (MINI_ELITE_TICKS.includes(this.tick)) {
+      // The Glowing Bat of VS: 50 health per cat level.
       const e = this.spawn(room.miniElite, true);
       e.r *= 1.8;
-      e.hp = e.maxHp = 25 * this.level;
+      e.hp = e.maxHp = 50 * this.level;
       e.dmg = Math.max(8, e.dmg + 1);
     }
     if (this.tick === BOSS_TICK) {
@@ -866,7 +914,12 @@ export class CatRun {
       const dx = p.x - en.x;
       const dy = p.y - en.y;
       const d = len(dx, dy) || 1;
-      const move = ENEMIES[en.kind].move;
+      const def = ENEMIES[en.kind];
+      const move = en.swarm ? 'flock' : def.move;
+      if (en.life > 0 && --en.life === 0) {
+        en.dead = true;
+        continue;
+      }
       if (d > DESPAWN_DISTANCE) {
         // A flock that flew past is gone.
         if (move === 'flock') {
@@ -924,12 +977,14 @@ export class CatRun {
       if (en.kind === 'washer' && (this.tick + en.id) % (TICK_RATE * 1.2) === 0) {
         this.hazards.push({ id: this.nextId++, kind: 'puddle', x: en.x, y: en.y, vx: 0, vy: 0, r: 30 + en.r, life: 6 * TICK_RATE });
       }
-      // Pigeons fly over furniture and fences.
-      if (move !== 'flock') [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
+      // Pigeons, moths and swarms fly over furniture and fences.
+      const fly = move === 'flock' || def.fly;
+      if (!fly) [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
+      else if (move !== 'flock') [en.x, en.y] = this.map.clamp(en.x, en.y, en.r); // but not out of the hall
       // Pressed flat against furniture: walk along it to get round instead of
       // standing there.
       const step = speed * DT;
-      if (step > 0 && move !== 'flock' && (en.x - ox) ** 2 + (en.y - oy) ** 2 < (step * 0.3) ** 2) {
+      if (step > 0 && !fly && (en.x - ox) ** 2 + (en.y - oy) ** 2 < (step * 0.3) ** 2) {
         const way = this.map.detour(en.x, en.y, en.r, p.x, p.y);
         if (way) [en.x, en.y] = this.map.pushOut(en.x + way[0] * step, en.y + way[1] * step, en.r);
       }

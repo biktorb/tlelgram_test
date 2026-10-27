@@ -323,9 +323,10 @@ export function loadSprites(): Promise<void> {
 }
 
 // Returns the sprite drawn at `px` device pixels square, mirrored if `flip`.
-export function sprite(id: SpriteId, px: number, flip = false): HTMLCanvasElement {
+// A `tint` colours it over, for the kinds that share a picture.
+export function sprite(id: SpriteId, px: number, flip = false, tint?: string): HTMLCanvasElement {
   const size = Math.max(8, Math.round(px));
-  const key = `${id}:${size}:${flip}`;
+  const key = `${id}:${size}:${flip}:${tint ?? ''}`;
   let s = cache.get(key);
   if (!s) {
     s = document.createElement('canvas');
@@ -342,6 +343,13 @@ export function sprite(id: SpriteId, px: number, flip = false): HTMLCanvasElemen
       c.lineJoin = 'round';
       c.lineCap = 'round';
       PAINT[id](c);
+    }
+    if (tint) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalCompositeOperation = 'source-atop';
+      c.globalAlpha = 0.38;
+      c.fillStyle = tint;
+      c.fillRect(0, 0, size, size);
     }
     cache.set(key, s);
   }
