@@ -1,4 +1,4 @@
-import type { CardId } from './content.ts';
+import { EVOLUTIONS, isPassive, type CardId } from './content.ts';
 import { dirFromVector, Recorder } from './record.ts';
 import { CatRun, DIR_VECTORS } from './sim.ts';
 
@@ -47,7 +47,7 @@ export function botMove(run: CatRun, style: BotStyle): number {
   }
   for (const it of run.pickups) {
     if (it.kind === 'food' && p.hp > p.maxHp * 0.7) continue;
-    const d2 = ((it.x - p.x) ** 2 + (it.y - p.y) ** 2) / 4;
+    const d2 = ((it.x - p.x) ** 2 + (it.y - p.y) ** 2) / (it.kind === 'chest' ? 16 : 4);
     if (d2 < gd) {
       gd = d2;
       gem = it;
@@ -60,7 +60,8 @@ export function botMove(run: CatRun, style: BotStyle): number {
     const [mx, my] = DIR_VECTORS[dir];
     const qx = p.x + mx * step;
     const qy = p.y + my * step;
-    let score = 0;
+    // Walking into furniture gets the cat nowhere.
+    let score = run.map.blocked(qx, qy, p.r + 2) ? -40 : 0;
     let close = Infinity;
     // The claws hit the side the cat faces: turning to the swarm pays.
     const face = mx > 0.01 ? 1 : mx < -0.01 ? -1 : p.face;
@@ -100,8 +101,10 @@ export function botPick(run: CatRun, style: BotStyle): number {
   let best = 0;
   let rank = Infinity;
   offer.forEach((k, i) => {
-    const r = style.prefer.indexOf(k);
-    if (r >= 0 && r < rank) {
+    let r = style.prefer.indexOf(k);
+    // A passive that evolves an owned weapon comes first among passives.
+    if (r >= 0 && isPassive(k) && run.weapons().some((w) => EVOLUTIONS[w].passive === k)) r -= 10;
+    if (r > -100 && r < rank && style.prefer.includes(k)) {
       rank = r;
       best = i;
     }

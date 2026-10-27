@@ -136,3 +136,35 @@ test('weapons go up to 8 and the slots hold 6 of each kind', () => {
   for (const p of run.passives()) assert.ok(run.lvl(p) <= cats.itemMax(p));
   assert.ok(run.weapons().length <= 6 && run.passives().length <= 6);
 });
+
+test('a chest evolves a ready weapon, otherwise levels up items', () => {
+  const run = new CatRun(21);
+  run.items.claws = 8;
+  run.items.box = 1; // not the claws' passive
+  const elite = () => {
+    // An elite drops its chest under the cat.
+    const p = run.player;
+    run.pickups.push({ id: 9999, kind: 'chest', x: p.x, y: p.y, got: false });
+    run.step(0);
+  };
+  elite();
+  assert.equal(run.evolved.claws, undefined);
+  assert.ok(run.lvl('box') >= 2, 'the chest levelled up the only open item');
+  run.items.belly = 1;
+  assert.deepEqual(run.evolvable(), ['claws']);
+  elite();
+  assert.equal(run.evolved.claws, true);
+  assert.deepEqual(run.evolvable(), []);
+});
+
+test('furniture is the same for a seed and the cat cannot walk through it', () => {
+  const a = new cats.RoomMap(5);
+  const b = new cats.RoomMap(5);
+  assert.deepEqual(a.near(2000, -1500, 900), b.near(2000, -1500, 900));
+  const all = a.near(0, 0, 3000).slice();
+  assert.ok(all.length > 20);
+  assert.ok(all.every((f) => Math.abs(f.x + f.w / 2) > 200 || Math.abs(f.y + f.h / 2) > 200), 'the start is clear');
+  const f = all[0];
+  const [x, y] = a.pushOut(f.x + f.w / 2, f.y + 1, 14);
+  assert.ok(x <= f.x - 14 + 1e-9 || x >= f.x + f.w + 14 - 1e-9 || y <= f.y - 14 + 1e-9 || y >= f.y + f.h + 14 - 1e-9);
+});

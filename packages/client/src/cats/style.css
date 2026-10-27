@@ -144,3 +144,7 @@ html, body {
 .slot .ico { width: 18px; height: 18px; }
 .slot .ico.emoji { font-size: 14px; line-height: 18px; }
 .reroll { margin-top: 4px; }
+.slot.evo { background: #ffe9a8; }
+.evos { display: flex; flex-direction: column; gap: 4px; max-width: 340px; font-size: 13px; color: var(--muted); text-align: left; }
+.evos b { color: var(--ink); text-align: center; }
+.evos .done { color: var(--accent); font-weight: 800; }

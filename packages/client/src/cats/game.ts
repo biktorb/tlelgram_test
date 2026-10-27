@@ -40,6 +40,7 @@ interface FloatText {
   color: string;
   size: number;
   t: number;
+  life: number;
 }
 interface Ring {
   x: number;
@@ -87,8 +88,13 @@ class Ghost {
 }
 
 const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = { mouse: 'mouse', dust: 'dust', robot: 'vacuum', bigrobot: 'vacuum', mop: 'boss' };
-const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟' };
-const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟' };
+const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟', chest: '🎁' };
+const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟', chest: '' };
+const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
+  sofa: ['#6f8fc9', '#8eaadb', '#46639a'],
+  table: ['#b07a4a', '#c99563', '#7d5230'],
+  wardrobe: ['#8a5a3b', '#a2714f', '#5e3a22'],
+};
 const VIEW_RADIUS = 470; // world units from the cat to the nearest screen edge, at most
 
 export class Game {
@@ -339,6 +345,13 @@ export class Game {
         this.text(this.run.player.x, this.run.player.y - 40, PICKUP_TEXT[e.kind], '#ffe08a', 18);
         if (e.kind === 'alarm') this.shake = 14;
         break;
+      case 'chest': {
+        const p = this.run.player;
+        const lines = e.evolved.length ? e.evolved.map((w) => `✨ ${cats.EVOLUTIONS[w].name}!`) : e.items.map((k) => `${cats.cardName(k)} +1`);
+        lines.forEach((s, i) => this.text(p.x, p.y - 50 - i * 22, s, e.evolved.length ? '#ffcf3f' : '#ffe08a', e.evolved.length ? 24 : 17, 1.6));
+        this.burst(p.x, p.y, 30, '#ffcf3f');
+        break;
+      }
       case 'slash':
         this.slashes.push({ ...e, t: 0 });
         break;
@@ -360,9 +373,9 @@ export class Game {
     }
   }
 
-  private text(x: number, y: number, s: string, color: string, size: number): void {
-    if (this.texts.length > 60) return;
-    this.texts.push({ x: x + (Math.random() - 0.5) * 12, y, s, color, size, t: 0 });
+  private text(x: number, y: number, s: string, color: string, size: number, life = 0.6): void {
+    if (this.texts.length > 60 && life <= 0.6) return;
+    this.texts.push({ x: x + (Math.random() - 0.5) * 12, y, s, color, size, t: 0, life });
   }
 
   private updateEffects(dt: number): void {
@@ -382,7 +395,7 @@ export class Game {
     for (const b of this.slashes) b.t += dt;
     for (const b of this.sparks) b.t += dt;
     this.particles = this.particles.filter((p) => p.t < p.life);
-    this.texts = this.texts.filter((t) => t.t < 0.6);
+    this.texts = this.texts.filter((t) => t.t < t.life);
     this.rings = this.rings.filter((r) => r.t < 0.35);
     this.slashes = this.slashes.filter((b) => b.t < 0.18);
     this.sparks = this.sparks.filter((b) => b.t < 0.3);
@@ -401,6 +414,52 @@ export class Game {
     const px = size * this.zoom * this.dpr;
     const img = flash ? flashSprite(id, px, flip) : sprite(id, px, flip);
     c.drawImage(img, x - size / 2, y - size / 2, size, size);
+  }
+
+  private furniture: cats.Furniture[] = [];
+
+  private drawFurniture(f: cats.Furniture): void {
+    const c = this.ctx;
+    const [body, top, edge] = FURNITURE_COLORS[f.kind];
+    c.fillStyle = 'rgba(60, 40, 20, .2)';
+    c.fillRect(f.x + 6, f.y + 8, f.w, f.h);
+    c.fillStyle = body;
+    c.strokeStyle = edge;
+    c.lineWidth = 3;
+    c.beginPath();
+    c.roundRect(f.x, f.y, f.w, f.h, 8);
+    c.fill();
+    c.stroke();
+    c.fillStyle = top;
+    if (f.kind === 'sofa') {
+      // Cushions along the long side.
+      const n = 3;
+      const along = f.w >= f.h;
+      for (let i = 0; i < n; i++) {
+        c.beginPath();
+        if (along) c.roundRect(f.x + 8 + (i * (f.w - 16)) / n, f.y + 10, (f.w - 16) / n - 4, f.h - 18, 6);
+        else c.roundRect(f.x + 10, f.y + 8 + (i * (f.h - 16)) / n, f.w - 18, (f.h - 16) / n - 4, 6);
+        c.fill();
+      }
+    } else if (f.kind === 'table') {
+      c.beginPath();
+      c.roundRect(f.x + 8, f.y + 8, f.w - 16, f.h - 16, 6);
+      c.fill();
+    } else {
+      // Wardrobe doors.
+      c.fillRect(f.x + 6, f.y + 6, f.w - 12, f.h - 12);
+      c.strokeStyle = edge;
+      c.lineWidth = 2;
+      c.beginPath();
+      if (f.w < f.h) {
+        c.moveTo(f.x + f.w / 2, f.y + 6);
+        c.lineTo(f.x + f.w / 2, f.y + f.h - 6);
+      } else {
+        c.moveTo(f.x + 6, f.y + f.h / 2);
+        c.lineTo(f.x + f.w - 6, f.y + f.h / 2);
+      }
+      c.stroke();
+    }
   }
 
   private floorPattern(): CanvasPattern {
@@ -455,6 +514,9 @@ export class Game {
       c.lineWidth = 1.5;
       c.stroke();
     }
+
+    // Furniture: a shadow, the body and a lighter top.
+    for (const f of run.map.near(px, py, (Math.max(this.W, this.H) / 2) * z + 140, this.furniture)) this.drawFurniture(f);
 
     // Puddles from the glass, under everything.
     for (const zn of run.zones) {
@@ -628,7 +690,7 @@ export class Game {
     c.textAlign = 'center';
     c.lineJoin = 'round';
     for (const tx of this.texts) {
-      c.globalAlpha = 1 - tx.t / 0.6;
+      c.globalAlpha = Math.min(1, 2 * (1 - tx.t / tx.life));
       c.font = `800 ${tx.size}px system-ui, sans-serif`;
       c.lineWidth = 3.5;
       c.strokeStyle = 'rgba(30, 20, 40, .85)';

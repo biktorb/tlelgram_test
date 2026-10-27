@@ -12,25 +12,27 @@ function pct(xs: number[], p: number): number {
 }
 const mmss = (sec: number) => (sec === Infinity ? '—' : `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`);
 
-console.log(`| Бот | Стиль | Медиана | 10% худших | Побед | Уровень | Оружия на 8 | Полная сборка (медиана) |`);
-console.log(`|---|---|---|---|---|---|---|---|`);
+console.log(`| Бот | Стиль | Медиана | 10% худших | Побед | Уровень | Оружия на 8 | Эволюций | Полная сборка (медиана) |`);
+console.log(`|---|---|---|---|---|---|---|---|---|`);
 for (const [skillName, skill] of Object.entries(BOT_SKILLS)) {
   for (const [styleName, style] of Object.entries(BOT_STYLES)) {
     const times: number[] = [];
     const levels: number[] = [];
     const maxed: number[] = [];
     const full: number[] = [];
+    const evos: number[] = [];
     let wins = 0;
     for (let i = 0; i < RUNS; i++) {
       const run = playBot(1000 + i, style, skill).run;
       times.push(run.tick / TICK_RATE);
       levels.push(run.level);
       maxed.push(run.weapons().filter((w) => isWeapon(w) && run.lvl(w) >= 8).length);
+      evos.push(Object.keys(run.evolved).length);
       full.push(run.fullTick < 0 ? Infinity : run.fullTick / TICK_RATE);
       if (run.won) wins++;
     }
     console.log(
-      `| ${skillName} | ${styleName} | ${mmss(pct(times, 0.5))} | ${mmss(pct(times, 0.1))} | ${Math.round((100 * wins) / RUNS)}% | ${pct(levels, 0.5)} | ${pct(maxed, 0.5)} | ${mmss(pct(full, 0.5))} |`,
+      `| ${skillName} | ${styleName} | ${mmss(pct(times, 0.5))} | ${mmss(pct(times, 0.1))} | ${Math.round((100 * wins) / RUNS)}% | ${pct(levels, 0.5)} | ${pct(maxed, 0.5)} | ${pct(evos, 0.5)} | ${mmss(pct(full, 0.5))} |`,
     );
   }
 }
