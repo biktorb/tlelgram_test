@@ -1,7 +1,7 @@
 import { cats, FRAMES } from '@otryad/core';
 import { haptic, initTelegram, setBack, shareLink, startParam } from '../telegram.ts';
 import { ApiError, connect, type Finished, type HeroInfo, type Profile, type Score, type Started } from './api.ts';
-import { Game, type RunRecord } from './game.ts';
+import { Game, type GameOptions, type RunRecord } from './game.ts';
 import { catSprite, loadSprites, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
@@ -24,7 +24,7 @@ let serverRun: Started['run'] | null = null;
 // ---------- saved data (this device) ----------
 interface Saved {
   best?: { ticks: number; kills: number; won: boolean };
-  last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId; room?: RoomId };
+  last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId; room?: RoomId; powers?: cats.Powers };
   hero?: HeroId; // the cat picked for the next run
   room?: RoomId; // and the room
 }
@@ -186,7 +186,7 @@ function menu(): void {
   if (s.last) {
     const last = s.last;
     buttons.append(
-      button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record, ghostHero: last.hero, hero: chosenHero(), room: last.room })),
+      button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record, ghostHero: last.hero, ghostPowers: last.powers, hero: chosenHero(), room: last.room, powers: last.powers })),
     );
   }
   box.append(buttons);
@@ -197,6 +197,7 @@ function menu(): void {
       button('📅 Вызов дня', 'tile', () => dailyScreen()),
       button('🏆 Лига', 'tile', () => leagueScreen()),
       button('🐟 Рыба', 'tile', () => profileScreen()),
+      button('⚡ Прокачка', 'tile', () => powerScreen()),
       button('⚔️ Вызовы', 'tile', () => answersScreen()),
     );
     box.append(more);
@@ -241,10 +242,12 @@ function playServer(s: Started): void {
   play(s.run.seed, {
     ghost: s.ghost?.record,
     ghostHero: s.ghost?.hero,
+    ghostPowers: s.ghost?.powers,
     progress: s.run.progress ?? undefined,
     ghostName: s.ghost?.name,
     hero: s.run.hero,
     room: s.run.room,
+    powers: s.run.powers,
   });
 }
 
@@ -253,7 +256,7 @@ function saveProgress(): void {
   api.progress(serverRun.id, game.rec.record()).catch(() => {});
 }
 
-function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; ghostName?: string; hero?: HeroId; ghostHero?: HeroId; room?: RoomId } = {}): void {
+function play(seed: number, opts: GameOptions & { ghostName?: string } = {}): void {
   stopGame();
   ui.replaceChildren(hud(opts.ghostName));
   setBack(() => pauseMenu());
@@ -266,7 +269,7 @@ function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; gho
       onEnd: (run, record) => void finish(seed, run, record, !!opts.ghost),
       onEvent: (e) => {
         if (e.t === 'hurt') haptic.hit();
-        if (e.t === 'level') haptic.result('success');
+        if (e.t === 'level' || e.t === 'revive') haptic.result('success');
       },
       onCheckpoint: saveProgress,
     },
@@ -381,7 +384,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   const mine = { won: run.won, ticks: run.tick, kills: run.kills };
   const better = !s.best || cats.compareScores(mine, s.best) < 0;
   if (better) s.best = mine;
-  s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero, room: run.room };
+  s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero, room: run.room, powers: run.powers };
   save(s);
 
   const playedRun = serverRun;
@@ -416,7 +419,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     ...(run.tick > RUN_SECONDS * TICK_RATE ? [h('p', 'best', `От Уборщицы ${Math.floor((run.tick - RUN_SECONDS * TICK_RATE) / TICK_RATE)} с`)] : []),
   );
   if (vs) box.append(h('p', 'vs', vs));
-  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги`));
+  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги${server.result.fish ? ` · +${server.result.fish} 🐟` : ''}`));
   if (server?.daily?.rank) box.append(h('p', 'best', `Вызов дня: ${server.daily.rank} место`));
   else if (better) box.append(h('p', 'best', 'Новый рекорд!'));
   if (error) box.append(h('p', 'error', error));
@@ -497,6 +500,53 @@ function heroScreen(): void {
     }
     const p = await api.profile();
     render(p.heroes, p.fish);
+  });
+}
+
+// ---------- Power Ups ----------
+// Permanent bonuses for fish, as in VS; every level bought makes the next ones dearer.
+function powerScreen(): void {
+  screen('Прокачка', async (box) => {
+    const render = (p: Profile) => {
+      box.replaceChildren(
+        h('p', '', 'Бонусы навсегда, для всех котов. Каждая покупка дорожает следующие на 10%. Рыбу можно вернуть и купить в другом порядке.'),
+        h('p', 'best', `🐟 ${p.fish}`),
+      );
+      for (const id of cats.POWER_IDS) {
+        const def: cats.PowerDef = cats.POWERS[id];
+        const lvl = p.powers[id] ?? 0;
+        const card = h('div', `herocard${lvl ? ' on' : ''}`);
+        const text = h('div', 'text');
+        text.append(h('b', '', `${def.name} ${'●'.repeat(lvl)}${'○'.repeat(def.max - lvl)}`), h('span', '', `${def.desc} за уровень`));
+        card.append(text);
+        if (lvl >= def.max) card.append(h('span', 'lv', 'максимум'));
+        else {
+          const price = cats.powerPrice(id, p.powers);
+          const b = button(`${price} 🐟`, 'btn small', async () => {
+            try {
+              render(await api!.shop('buy', `power:${id}`));
+            } catch (e) {
+              toast(errorText(e));
+            }
+          });
+          b.disabled = p.fish < price;
+          card.append(b);
+        }
+        box.append(card);
+      }
+      if (p.powerSpent > 0) {
+        box.append(
+          button(`Вернуть всё (${p.powerSpent} 🐟)`, 'btn secondary', async () => {
+            try {
+              render(await api!.refund());
+            } catch (e) {
+              toast(errorText(e));
+            }
+          }),
+        );
+      }
+    };
+    render(await api!.profile());
   });
 }
 

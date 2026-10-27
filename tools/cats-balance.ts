@@ -1,9 +1,10 @@
 // Balance check for «Коты против пылесосов»: bots of three skill levels play
 // full runs, and the table shows how long they last and when the build is full.
-// Usage: node tools/cats-balance.ts [runs per cell] [cat|all] [room|all]
+// Usage: node tools/cats-balance.ts [runs per cell] [cat|all] [room|all] [max]
+// `max` gives the bots every Power Up at its top level.
 import { cats } from '../packages/core/src/index.ts';
 
-const { BOT_SKILLS, BOT_STYLES, HERO_IDS, ROOM_IDS, TICK_RATE, isHero, isRoom, isWeapon, playBot } = cats;
+const { BOT_SKILLS, BOT_STYLES, HERO_IDS, POWERS, POWER_IDS, ROOM_IDS, TICK_RATE, isHero, isRoom, isWeapon, playBot } = cats;
 const RUNS = Number(process.argv[2] ?? 8);
 const arg = process.argv[3] ?? 'ryzhik';
 const heroes = arg === 'all' ? HERO_IDS : isHero(arg) ? [arg] : [];
@@ -11,6 +12,7 @@ if (!heroes.length) throw new Error(`unknown cat: ${arg}`);
 const roomArg = process.argv[4] ?? 'flat';
 const rooms = roomArg === 'all' ? ROOM_IDS : isRoom(roomArg) ? [roomArg] : [];
 if (!rooms.length) throw new Error(`unknown room: ${roomArg}`);
+const powers = process.argv[5] === 'max' ? Object.fromEntries(POWER_IDS.map((id) => [id, POWERS[id].max])) : {};
 
 function pct(xs: number[], p: number): number {
   const s = xs.slice().sort((a, b) => a - b);
@@ -30,7 +32,7 @@ for (const room of rooms) for (const hero of heroes) {
       const evos: number[] = [];
       let wins = 0;
       for (let i = 0; i < RUNS; i++) {
-        const run = playBot(1000 + i, style, skill, { hero, room }).run;
+        const run = playBot(1000 + i, style, skill, { hero, room, powers }).run;
         times.push(run.tick / TICK_RATE);
         levels.push(run.level);
         maxed.push(run.weapons().filter((w) => isWeapon(w) && run.lvl(w) >= 8).length);

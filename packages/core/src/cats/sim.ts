@@ -19,6 +19,7 @@ import {
   type HeroId,
   type ItemId,
   type PassiveId,
+  type Powers,
   type RoomId,
   type Stats,
   type WeaponId,
@@ -197,6 +198,7 @@ export type SimEvent =
   | { t: 'hurt'; dmg: number; kind: EnemyKind }
   | { t: 'wind'; x: number; y: number }
   | { t: 'level' }
+  | { t: 'revive' }
   | { t: 'boss' }
   | { t: 'cleaner' }
   | { t: 'elite' }
@@ -231,6 +233,7 @@ export interface RunOptions {
   events?: boolean;
   hero?: HeroId;
   room?: RoomId;
+  powers?: Powers; // Power Up levels bought with fish
 }
 
 // Removes the items that fail `keep`, in place and in order.
@@ -245,6 +248,7 @@ export class CatRun {
   readonly rng: Rng;
   readonly hero: HeroId;
   readonly room: RoomId;
+  readonly powers: Powers;
   tick = 0;
   over = false;
   won = false;
@@ -254,6 +258,7 @@ export class CatRun {
   need = xpToNext(1);
   fish = 0;
   rerolls = 1;
+  revives = 0; // Девятая жизнь left
   evolved: Partial<Record<WeaponId, boolean>> = {};
   readonly map: RoomMap;
   // Tick when every slot was full and maxed, or -1.
@@ -290,6 +295,9 @@ export class CatRun {
     this.trackEvents = opts.events ?? true;
     this.hero = opts.hero ?? 'ryzhik';
     this.room = opts.room ?? 'flat';
+    this.powers = { ...opts.powers };
+    this.rerolls += this.powers.reroll ?? 0;
+    this.revives = this.powers.revive ?? 0;
     this.map = new RoomMap(this.seed, ROOMS[this.room].shape);
     this.items[HEROES[this.hero].weapon] = 1;
     this.recompute();
@@ -894,17 +902,37 @@ export class CatRun {
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
       if (d < (en.r + p.r) * CONTACT && p.inv <= 0 && !en.dead) {
-        const dmg = Math.max(1, en.dmg - this.stats.armor);
-        p.hp -= dmg;
-        p.inv = Math.round(0.4 * TICK_RATE);
-        this.emit({ t: 'hurt', dmg, kind: en.kind });
-        if (p.hp <= 0) {
-          p.hp = 0;
-          this.finish(false);
-          return;
-        }
+        if (this.hurt(en.dmg, en.kind)) return;
       }
     }
+  }
+
+  // A hit on the cat; true when it ended the run. Девятая жизнь brings the
+  // cat back once with half its health and pushes the vacuums away.
+  private hurt(raw: number, kind: EnemyKind): boolean {
+    const p = this.player;
+    const dmg = Math.max(1, raw - this.stats.armor);
+    p.hp -= dmg;
+    p.inv = Math.round(0.4 * TICK_RATE);
+    this.emit({ t: 'hurt', dmg, kind });
+    if (p.hp > 0) return false;
+    if (this.revives > 0) {
+      this.revives--;
+      p.hp = p.maxHp / 2;
+      p.inv = 2 * TICK_RATE;
+      for (const en of this.enemies) {
+        const d = len(en.x - p.x, en.y - p.y) || 1;
+        if (d < 300) {
+          en.kx += ((en.x - p.x) / d) * 600;
+          en.ky += ((en.y - p.y) / d) * 600;
+        }
+      }
+      this.emit({ t: 'revive' });
+      return false;
+    }
+    p.hp = 0;
+    this.finish(false);
+    return true;
   }
 
   // The boss of the room: the blower blows the cat away and throws leaves,
@@ -983,15 +1011,7 @@ export class CatRun {
       z.y += z.vy * DT;
       if (p.inv <= 0 && (z.x - p.x) ** 2 + (z.y - p.y) ** 2 < (z.r + p.r * CONTACT) ** 2) {
         z.life = 0;
-        const dmg = Math.max(1, LEAF_DMG - this.stats.armor);
-        p.hp -= dmg;
-        p.inv = Math.round(0.4 * TICK_RATE);
-        this.emit({ t: 'hurt', dmg, kind: 'blower' });
-        if (p.hp <= 0) {
-          p.hp = 0;
-          this.finish(false);
-          return;
-        }
+        if (this.hurt(LEAF_DMG, 'blower')) return;
       }
     }
   }
@@ -1210,6 +1230,18 @@ export class CatRun {
   private recompute(): void {
     const s: Stats = { ...BASE_STATS, ...HEROES[this.hero].stats };
     const baseHp = s.maxHp;
+    // Power Ups bought with fish.
+    const pw = this.powers;
+    s.might += 0.05 * (pw.might ?? 0);
+    s.armor += pw.armor ?? 0;
+    s.maxHp += baseHp * 0.1 * (pw.maxHp ?? 0);
+    s.recovery += 0.1 * (pw.recovery ?? 0);
+    s.move *= 1 + 0.05 * (pw.move ?? 0);
+    s.area += 0.05 * (pw.area ?? 0);
+    s.cooldown -= 0.025 * (pw.cooldown ?? 0);
+    s.magnet *= 1 + 0.25 * (pw.magnet ?? 0);
+    s.luck += 0.1 * (pw.luck ?? 0);
+    s.growth += 0.03 * (pw.growth ?? 0);
     for (const id of this.passives()) {
       const per = PASSIVES[id].per;
       const l = this.lvl(id);

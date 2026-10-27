@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import type { GameEvent } from './stats.ts';
-import type { cats } from '@otryad/core';
+import { cats } from '@otryad/core';
 import {
   type Activity,
   type BuyResult,
@@ -81,9 +81,9 @@ export class PgStore implements Store {
   async createRun(userId: number, n: NewRun): Promise<StoredRun> {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero, room)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${RUN_COLUMNS}`,
-        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik', n.room ?? 'flat'],
+        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero, room, powers)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${RUN_COLUMNS}`,
+        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik', n.room ?? 'flat', n.powers ?? {}],
       );
       return toRun(rows[0]);
     } catch (e) {
@@ -128,10 +128,14 @@ export class PgStore implements Store {
 
   async finishRun(runId: string, o: RunOutcome, record: RunRecord): Promise<boolean> {
     if (!UUID.test(runId)) return false;
+    // The run's fish go to the player in the same statement, so they are paid once.
     const { rowCount } = await this.pool.query(
-      `UPDATE cat_runs SET finished_at = clock_timestamp(), won = $2, ticks = $3, kills = $4, level = $5, points = $6, record = $7
-       WHERE id = $1 AND finished_at IS NULL`,
-      [runId, o.won, o.ticks, o.kills, o.level, o.points, record],
+      `WITH done AS (
+         UPDATE cat_runs SET finished_at = clock_timestamp(), won = $2, ticks = $3, kills = $4, level = $5, points = $6, record = $7, fish = $8
+         WHERE id = $1 AND finished_at IS NULL RETURNING user_id
+       )
+       UPDATE users SET fish = users.fish + $8 FROM done WHERE users.id = done.user_id`,
+      [runId, o.won, o.ticks, o.kills, o.level, o.points, record, o.fish],
     );
     return rowCount === 1;
   }
@@ -292,13 +296,15 @@ export class PgStore implements Store {
   }
 
   async wallet(userId: number): Promise<Wallet> {
-    const { rows } = await this.pool.query<{ fish: number; frame: string | null; owned: string[] }>(
-      `SELECT u.fish, u.frame, coalesce(array_agg(i.item ORDER BY i.created_at) FILTER (WHERE i.item IS NOT NULL), '{}') AS owned
+    const { rows } = await this.pool.query<{ fish: number; frame: string | null; owned: string[]; powers: cats.Powers; power_spent: number }>(
+      `SELECT u.fish, u.frame, u.powers, u.power_spent, coalesce(array_agg(i.item ORDER BY i.created_at) FILTER (WHERE i.item IS NOT NULL), '{}') AS owned
        FROM users u LEFT JOIN user_items i ON i.user_id = u.id
        WHERE u.id = $1 GROUP BY u.id`,
       [userId],
     );
-    return rows[0] ?? { fish: 0, frame: null, owned: [] };
+    const r = rows[0];
+    if (!r) return { fish: 0, frame: null, owned: [], powers: {}, powerSpent: 0 };
+    return { fish: r.fish, frame: r.frame, owned: r.owned, powers: cats.cleanPowers(r.powers), powerSpent: r.power_spent };
   }
 
   async activity(userId: number, since: Date): Promise<Activity> {
@@ -354,6 +360,21 @@ export class PgStore implements Store {
     await this.pool.query('UPDATE users SET frame = $2 WHERE id = $1', [userId, frame]);
   }
 
+  async buyPower(userId: number, id: cats.PowerId, from: number, price: number): Promise<BuyResult> {
+    const { rowCount } = await this.pool.query(
+      `UPDATE users SET fish = fish - $4, power_spent = power_spent + $4, powers = powers || jsonb_build_object($2::text, $3::int + 1)
+       WHERE id = $1 AND coalesce((powers ->> $2::text)::int, 0) = $3 AND fish >= $4`,
+      [userId, id, from, price],
+    );
+    if (rowCount === 1) return 'ok';
+    const { powers } = await this.wallet(userId);
+    return (powers[id] ?? 0) !== from ? 'owned' : 'poor';
+  }
+
+  async refundPowers(userId: number): Promise<void> {
+    await this.pool.query(`UPDATE users SET fish = fish + power_spent, power_spent = 0, powers = '{}' WHERE id = $1`, [userId]);
+  }
+
   async addEvent(userId: number, name: string, data: Record<string, unknown> | null = null): Promise<void> {
     await this.pool.query('INSERT INTO events (user_id, name, data) VALUES ($1, $2, $3)', [userId, name, data]);
   }
@@ -380,7 +401,7 @@ export class PgStore implements Store {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUN_COLUMNS =
-  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, room, started_at, finished_at, won, ticks, kills, level, points, record";
+  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, room, cat_runs.powers, started_at, finished_at, won, ticks, kills, level, points, cat_runs.fish, record";
 const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
 
 interface ScoreSqlRow {
@@ -403,6 +424,7 @@ function toRun(row: {
   aura: string | null;
   hero: StoredRun['hero'];
   room: StoredRun['room'];
+  powers: unknown;
   started_at: Date;
   finished_at: Date | null;
   won: boolean;
@@ -410,6 +432,7 @@ function toRun(row: {
   kills: number;
   level: number;
   points: number;
+  fish: number;
   record: RunRecord | null;
 }): StoredRun {
   return {
@@ -422,6 +445,7 @@ function toRun(row: {
     aura: row.aura,
     hero: row.hero,
     room: row.room,
+    powers: cats.cleanPowers(row.powers),
     startedAt: row.started_at.getTime(),
     finished: row.finished_at !== null,
     won: row.won,
@@ -429,6 +453,7 @@ function toRun(row: {
     kills: row.kills,
     level: row.level,
     points: row.points,
+    fish: row.fish,
     record: row.record,
   };
 }
