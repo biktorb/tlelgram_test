@@ -205,3 +205,15 @@ test('a run analysis matches its replay and counts every hit', () => {
   assert.equal(s.runs, 2);
   assert.equal(s.perMinute[0].alive, 2);
 });
+
+test('an item never goes past its last level, even when a chest maxed it while cards were shown', () => {
+  const run = new cats.CatRun(1);
+  run.items.pot = cats.WEAPON_MAX;
+  run.pending = ['pot', 'snack', 'fishes'];
+  const fish = run.fish;
+  run.choose(0);
+  assert.equal(run.lvl('pot'), cats.WEAPON_MAX);
+  assert.equal(run.fish, fish + 10);
+  run.step(0);
+  assert.equal(run.over, false);
+});
