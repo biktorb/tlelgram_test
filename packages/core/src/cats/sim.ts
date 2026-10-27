@@ -45,11 +45,11 @@ const SCREEN_Y = 460;
 // Difficulty knobs, tuned with `npm run balance:cats`.
 export const BALANCE = {
   hpPerMin: 0.15, // enemy health grows by this share every minute
-  hpPerMin2: 0.03, // and by this share every minute squared, to keep up with upgrades
-  crowdScale: 1, // multiplies the fewest enemies of every minute (CROWD)
+  hpPerMin2: 0.08, // and by this share every minute squared, to keep up with upgrades
+  crowdScale: 1.3, // multiplies the fewest enemies of every minute (CROWD)
   burstEvery: 1.2, // seconds between extra spawns
   meowPush: 90, // knockback of the meow aura
-  xpPerMin: 0.2, // gems grow by this share every minute, as levels get dearer
+  xpPerMin: 0.15, // gems grow by this share every minute, as levels get dearer
 };
 
 // The fewest enemies around the cat in each minute, after Mad Forest.
@@ -562,14 +562,18 @@ export class CatRun {
       this.cd[id] = Math.max(2, Math.round(w.cd * TICK_RATE));
       switch (id) {
         case 'claws': {
-          const width = 130 * w.area;
-          const h = 34 * w.area;
+          // Like the VS whip: a long horizontal slash that starts a little
+          // behind the cat; the second one goes the other way, a bit higher.
+          const width = 150 * w.area;
+          const back = 30 * w.area;
+          const h = 40 * w.area;
           for (let i = 0; i < Math.min(w.amount, 2); i++) {
             const face = (i === 0 ? p.face : -p.face) as 1 | -1;
-            const cx = p.x + face * (width / 2 + 6);
-            this.emit({ t: 'slash', x: cx, y: p.y, w: width, h, face });
+            const cx = p.x + face * (width / 2 - back);
+            const cy = p.y - i * h * 0.5;
+            this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
             for (const en of this.enemies) {
-              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - p.y) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0);
+              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0);
             }
           }
           break;

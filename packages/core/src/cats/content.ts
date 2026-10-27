@@ -16,14 +16,14 @@ export interface EnemyDef {
 }
 
 // Modelled on Mad Forest at about 70% of its health and damage: mice are
-// bats (weak, faster than the cat), dust is zombies and skeletons, robots
+// bats (weak, the fastest chasers), dust is zombies and skeletons, robots
 // are mudmen that charge, the big robot is the Mantichana-type elite.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
-  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 125, dmg: 4, xp: 1, move: 'chase' },
-  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 95, dmg: 7, xp: 1.5, move: 'chase' },
-  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 175, dmg: 7, xp: 2.5, move: 'charge' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 120, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 120, dmg: 30, xp: 0, move: 'chase' },
+  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 115, dmg: 4, xp: 1, move: 'chase' },
+  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 85, dmg: 7, xp: 1.5, move: 'chase' },
+  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 155, dmg: 7, xp: 2.5, move: 'charge' },
+  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 90, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 100, dmg: 30, xp: 0, move: 'chase' },
 };
 
 // The cat's stats. Weapons read them, passives and the hero change them.

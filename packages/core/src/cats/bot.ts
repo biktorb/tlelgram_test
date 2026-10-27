@@ -82,7 +82,7 @@ export function botMove(run: CatRun, style: BotStyle): number {
       const reach = style.fear + en.r + p.r;
       if (d < reach) score -= en.dmg * care * (1 + ((reach - d) / reach) * 4);
       if (d < close) close = d;
-      if (clawsValue && Math.abs(ex - (qx + face * 70)) < 65 + en.r && Math.abs(ey - qy) < 17 + en.r) score += clawsValue;
+      if (clawsValue && Math.abs(ex - (qx + face * 45)) < 75 + en.r && Math.abs(ey - qy) < 20 + en.r) score += clawsValue;
     }
     // Stay near the swarm rather than run off.
     if (close < Infinity && close > style.fear * 2) score -= (close - style.fear * 2) * 0.02;
