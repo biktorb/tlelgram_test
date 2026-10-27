@@ -81,7 +81,7 @@ VITE_API_URL=http://localhost:3000 npm run dev
 
 Тесты на PostgreSQL: `TEST_DATABASE_URL=postgres://… npm test` (без переменной тесты идут только на хранилище в памяти).
 
-Нагрузочная проверка против сервера с `DEV_AUTH=1`: `node tools/load.ts http://localhost:3000 200 5`.
+Нагрузочная проверка против сервера с `DEV_AUTH=1`: `node tools/load.ts http://localhost:3000 50`: 50 игроков одновременно заканчивают забег, сервер проверяет каждый повтором.
 
 ## Развёртывание на VPS
 

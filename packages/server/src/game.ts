@@ -1,8 +1,8 @@
 import { randomInt } from 'node:crypto';
-import { ActionError, battle, DAILY_TASKS, frameById, hashSeed, Run, SEASON_PASS, SEASON_POINTS_PER_LEVEL, type Action, type BattleOutcome, type BattleResult, type RunState } from '@otryad/core';
-import { DailyTakenError, type Duel, type LeagueEntry, type DuelInboxItem, type GhostUnit, type Store, type StoredRun } from './store.ts';
+import { cats, DAILY_TASKS, frameById, hashSeed, SEASON_PASS, SEASON_POINTS_PER_LEVEL } from '@otryad/core';
+import { DailyTakenError, ghostOf, type Duel, type Ghost, type LeagueEntry, type DuelInboxItem, type RunMode, type RunOutcome, type RunRecord, type Store, type StoredRun } from './store.ts';
 
-export const MAX_ACTIONS_PER_TURN = 200;
+const { TICK_RATE } = cats;
 
 export class GameError extends Error {
   status: number;
@@ -12,12 +12,25 @@ export class GameError extends Error {
   }
 }
 
+// What the client needs to play or continue a run.
 export interface RunView {
   id: string;
-  version: number;
-  state: RunState;
-  duel: string | null; // code of the duel this run answers
+  seed: number;
+  mode: RunMode;
   daily: string | null; // date of the daily challenge this run plays
+  duel: string | null; // code of the duel this run answers
+  progress: RunRecord | null; // input saved so far, to continue the run
+}
+
+export interface StartResult {
+  run: RunView;
+  ghost: Ghost | null; // the run to race against, if any
+}
+
+export interface FinishResult {
+  result: RunOutcome;
+  daily?: { rank: number | null };
+  duel?: { challengerName: string; challenger: { won: boolean; ticks: number; kills: number }; beat: boolean };
 }
 
 export interface Profile {
@@ -35,10 +48,12 @@ export interface Profile {
   };
 }
 
+type Score = { name: string; won: boolean; ticks: number; kills: number; me: boolean };
+
 export interface DailyInfo {
   date: string;
   status: 'none' | 'active' | 'finished'; // the player's attempt today
-  top: { name: string; wins: number; lives: number; me: boolean }[];
+  top: Score[];
   rank: number | null; // the player's place once their attempt is finished
 }
 
@@ -83,38 +98,30 @@ export interface LeagueInfo {
   top: { name: string; points: number; me: boolean }[];
 }
 
-type BattleView = Pick<BattleOutcome, 'result' | 'start' | 'events' | 'left' | 'right'>;
-
 export interface DuelInfo {
   code: string;
   challengerId: number;
   challengerName: string;
-  wins: number;
-  team: GhostUnit[];
-}
-
-export interface TurnResult {
-  run: RunView;
-  battle: BattleView;
-  enemy: { name: string; frame: string | null };
-  // On the last turn of a run that answers a duel: the final team against the challenger's.
-  duel?: { battle: BattleView; challengerName: string };
+  won: boolean;
+  ticks: number;
+  kills: number;
 }
 
 // Told when a friend finishes a run that answers the player's duel.
 export interface Notifier {
-  duelAnswered(duel: Duel, friendName: string, friendResult: BattleResult): void;
+  duelAnswered(duel: Duel, friendName: string, beat: boolean): void;
 }
 
-const view = (r: StoredRun): RunView => ({ id: r.id, version: r.version, state: r.state, duel: r.duelCode, daily: r.daily });
-const battleView = (o: BattleOutcome): BattleView => ({ result: o.result, start: o.start, events: o.events, left: o.left, right: o.right });
-const withUids = (team: GhostUnit[]) => team.map((u, i) => ({ ...u, uid: i + 1 }));
+// A record may claim at most this much play per second of real time: the
+// game runs at 1x, the margin covers clock and network jitter.
+const SPEED_MARGIN = 0.95;
+const SLACK_MS = 3000;
+
+const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, progress: r.record });
 
 const CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const DUEL_CODE = /^[a-zA-Z0-9]{8}$/;
 const newCode = () => Array.from({ length: 8 }, () => CODE_ALPHABET[randomInt(0, CODE_ALPHABET.length)]).join('');
-
-const random = () => randomInt(0, 2 ** 31) / 2 ** 31;
 
 export class Game {
   private store: Store;
@@ -136,20 +143,116 @@ export class Game {
     }
   }
 
-  // Today's challenge: everyone starts from the same seed, one attempt each.
-  async startDaily(userId: number, chatInstance: string | null = null): Promise<RunView> {
-    const date = dayOf(this.now());
-    const existing = await this.store.dailyRun(userId, date);
-    if (existing && !existing.finished) return view(existing);
-    if (existing) throw new GameError(409, 'Вызов дня уже сыгран, новый будет завтра');
+  // Starts a run. A daily run that is not finished yet is continued instead;
+  // any other unfinished run is closed with the progress it has.
+  async start(userId: number, playerName: string, mode: RunMode, duelCode: string | null = null, chatInstance: string | null = null): Promise<StartResult> {
+    let seed = randomInt(0, 2 ** 31);
+    let daily: string | null = null;
+    let ghost: Ghost | null = null;
+    if (mode === 'daily') {
+      daily = dayOf(this.now());
+      const existing = await this.store.dailyRun(userId, daily);
+      if (existing && !existing.finished) return { run: view(existing), ghost: await this.store.dailyGhost(daily, userId) };
+      if (existing) throw new GameError(409, 'Вызов дня уже сыгран, новый будет завтра');
+      seed = dailySeed(daily);
+      ghost = await this.store.dailyGhost(daily, userId);
+    }
+    if (mode === 'duel') {
+      const duel = await this.duel(duelCode ?? '');
+      if (duel.challengerId === userId) throw new GameError(422, 'Это ваш собственный вызов');
+      seed = duel.run.seed;
+      ghost = ghostOf(duel.run, duel.challengerName);
+      duelCode = duel.code;
+    } else duelCode = null;
+
+    const active = await this.store.activeRun(userId);
+    if (active) await this.settle(active, playerName, active.record ?? { moves: '', picks: '' });
     try {
-      const run = view(await this.store.createRun(userId, new Run(dailySeed(date)).snapshot(), { daily: date, chatInstance }));
-      await this.track(userId, 'run_start', { mode: 'daily' });
-      return run;
+      const { frame } = await this.store.wallet(userId);
+      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame });
+      await this.track(userId, 'run_start', { mode });
+      return { run: view(run), ghost };
     } catch (e) {
       if (e instanceof DailyTakenError) throw new GameError(409, 'Вызов дня уже начат в другом окне');
       throw e;
     }
+  }
+
+  // The unfinished run to continue, with its ghost.
+  async current(userId: number): Promise<StartResult | null> {
+    const run = await this.store.activeRun(userId);
+    if (!run) return null;
+    let ghost: Ghost | null = null;
+    if (run.daily) ghost = await this.store.dailyGhost(run.daily, userId);
+    if (run.duelCode) {
+      const duel = await this.store.getDuel(run.duelCode);
+      if (duel) ghost = ghostOf(duel.run, duel.challengerName);
+    }
+    return { run: view(run), ghost };
+  }
+
+  private async ownActive(userId: number, runId: string): Promise<StoredRun> {
+    const run = await this.store.getRun(runId);
+    if (!run || run.userId !== userId) throw new GameError(404, 'Забег не найден');
+    if (run.finished) throw new GameError(409, 'Забег уже окончен');
+    return run;
+  }
+
+  // Checks that the record parses and was not played faster than real time.
+  private check(run: StoredRun, rec: RunRecord): void {
+    let ticks: number;
+    try {
+      ticks = cats.decodeMoves(rec.moves).length;
+      if (!/^[0-9]*$/.test(rec.picks) || rec.picks.length > 200) throw new Error('bad picks');
+    } catch {
+      throw new GameError(400, 'Неверная запись забега');
+    }
+    const minMs = (ticks / TICK_RATE) * 1000 * SPEED_MARGIN - SLACK_MS;
+    if (this.now() - run.startedAt < minMs) throw new GameError(422, 'Запись забега длиннее, чем прошло времени');
+  }
+
+  // Keeps the input so far, so the run can be continued later or on another device.
+  async save(userId: number, runId: string, rec: RunRecord): Promise<void> {
+    const run = await this.ownActive(userId, runId);
+    this.check(run, rec);
+    if (!(await this.store.saveProgress(run.id, rec))) throw new GameError(409, 'Забег уже окончен');
+  }
+
+  // Replays the player's input on the run's seed: the client's own result is never trusted.
+  async finish(userId: number, playerName: string, runId: string, rec: RunRecord): Promise<FinishResult> {
+    const run = await this.ownActive(userId, runId);
+    this.check(run, rec);
+    const out = await this.settle(run, playerName, rec);
+    if (!out) throw new GameError(409, 'Забег уже окончен');
+    return out;
+  }
+
+  private async settle(run: StoredRun, playerName: string, rec: RunRecord): Promise<FinishResult | null> {
+    let sim;
+    try {
+      sim = cats.replay(run.seed, rec);
+    } catch {
+      throw new GameError(400, 'Неверная запись забега');
+    }
+    const r = sim.result();
+    const result: RunOutcome = { won: r.won, ticks: r.ticks, kills: r.kills, level: r.level, points: cats.runPoints(r.ticks, r.won) };
+    if (!(await this.store.finishRun(run.id, result, rec))) return null;
+
+    await this.countLeagueRun(run.userId, result.points);
+    await this.track(run.userId, 'run_end', { seconds: Math.round(r.ticks / TICK_RATE), won: r.won, mode: run.mode, duel: run.mode === 'duel' });
+    const out: FinishResult = { result };
+    if (run.daily) out.daily = { rank: await this.store.dailyRank(run.userId, run.daily) };
+    if (run.duelCode) {
+      const duel = await this.store.getDuel(run.duelCode);
+      if (duel) {
+        const beat = cats.compareScores(result, duel.run) < 0;
+        await this.store.addDuelResult({ duelCode: duel.code, runId: run.id, userId: run.userId, userName: playerName, won: r.won, ticks: r.ticks, kills: r.kills, beat });
+        this.notifier?.duelAnswered(duel, playerName, beat);
+        const { won, ticks, kills } = duel.run;
+        out.duel = { challengerName: duel.challengerName, challenger: { won, ticks, kills }, beat };
+      }
+    }
+    return out;
   }
 
   async daily(userId: number): Promise<DailyInfo> {
@@ -162,7 +265,7 @@ export class Game {
     return {
       date,
       status: !mine ? 'none' : mine.finished ? 'finished' : 'active',
-      top: top.map(({ userId: id, name, wins, lives }) => ({ name, wins, lives, me: id === userId })),
+      top: top.map(({ userId: id, name, won, ticks, kills }) => ({ name, won, ticks, kills, me: id === userId })),
       rank,
     };
   }
@@ -204,11 +307,11 @@ export class Game {
     };
   }
 
-  private async countLeagueRun(userId: number, wins: number): Promise<void> {
+  private async countLeagueRun(userId: number, points: number): Promise<void> {
     const now = this.now();
     const week = weekOf(now);
     const place = await this.placement(userId, week);
-    await this.store.addLeagueRun({ userId, week, ...place }, dayOf(now), wins, LEAGUE_RUNS_PER_DAY);
+    await this.store.addLeagueRun({ userId, week, ...place }, dayOf(now), points, LEAGUE_RUNS_PER_DAY);
   }
 
   // Daily tasks pay out as soon as they are done; checking again never pays twice.
@@ -216,11 +319,15 @@ export class Game {
     const now = this.now();
     const day = dayOf(now);
     const [activity, daily, claimed] = await Promise.all([
-      this.store.dayActivity(userId, new Date(Date.parse(day) - DAY_OFFSET_MS)),
+      this.store.activity(userId, new Date(Date.parse(day) - DAY_OFFSET_MS)),
       this.store.dailyRun(userId, day),
       this.store.claimedTasks(userId, day),
     ]);
-    const progress: Record<string, number> = { runs: activity.runs, wins: activity.wins, daily: daily?.finished ? 1 : 0 };
+    const progress: Record<string, number> = {
+      runs: activity.runs,
+      minutes: Math.floor(activity.ticks / (60 * TICK_RATE)),
+      daily: daily?.finished ? 1 : 0,
+    };
     const tasks = DAILY_TASKS.map((t) => {
       const p = Math.min(progress[t.id] ?? 0, t.goal);
       return { ...t, progress: p, done: p >= t.goal };
@@ -230,14 +337,14 @@ export class Game {
     return { ...(await this.store.wallet(userId)), tasks, season };
   }
 
-  // The month's pass: wins earn points, every level reached pays once.
+  // The month's pass: finished runs earn their points, every level reached pays once.
   private async season(userId: number, day: string): Promise<Profile['season']> {
     const id = day.slice(0, 7);
     const start = `${id}-01`;
     const next = new Date(Date.parse(start));
     next.setUTCMonth(next.getUTCMonth() + 1);
-    const [{ wins: points }, claimed] = await Promise.all([
-      this.store.dayActivity(userId, new Date(Date.parse(start) - DAY_OFFSET_MS)),
+    const [{ points }, claimed] = await Promise.all([
+      this.store.activity(userId, new Date(Date.parse(start) - DAY_OFFSET_MS)),
       this.store.claimedTasks(userId, start),
     ]);
     const level = Math.min(Math.floor(points / SEASON_POINTS_PER_LEVEL), SEASON_PASS.length);
@@ -259,7 +366,7 @@ export class Game {
   async buy(userId: number, item: string): Promise<Profile> {
     const frame = frameById(item);
     if (!frame) throw new GameError(404, 'Такого товара нет');
-    if (frame.exclusive) throw new GameError(422, 'Эту рамку можно только заработать в сезоне');
+    if (frame.exclusive) throw new GameError(422, 'Эту ауру можно только заработать в сезоне');
     const res = await this.store.buyItem(userId, frame.id, frame.price);
     if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
     if (res === 'ok') {
@@ -269,170 +376,50 @@ export class Game {
     return this.profile(userId);
   }
 
-  // null puts the plain frame back on.
+  // null takes the aura off.
   async equip(userId: number, item: string | null): Promise<Profile> {
-    if (item !== null && !(await this.store.wallet(userId)).owned.includes(item)) throw new GameError(422, 'Эта рамка ещё не куплена');
+    if (item !== null && !(await this.store.wallet(userId)).owned.includes(item)) throw new GameError(422, 'Эта аура ещё не куплена');
     await this.store.setFrame(userId, item);
     return this.profile(userId);
   }
 
-  async current(userId: number): Promise<RunView | null> {
-    const run = await this.store.activeRun(userId);
-    return run ? view(run) : null;
-  }
-
-  // A duel run starts from the challenger's seed, so the first shop is the same.
-  async start(userId: number, duelCode: string | null = null, chatInstance: string | null = null): Promise<RunView> {
-    if (duelCode === null) {
-      const run = new Run(randomInt(0, 2 ** 31));
-      const stored = await this.store.createRun(userId, run.snapshot(), { chatInstance });
-      await this.track(userId, 'run_start', { mode: 'normal' });
-      return view(stored);
-    }
-    const duel = await this.duel(duelCode);
-    if (duel.challengerId === userId) throw new GameError(422, 'Это ваш собственный вызов');
-    const stored = await this.store.createRun(userId, new Run(duel.seed).snapshot(), { duelCode: duel.code, chatInstance });
-    await this.track(userId, 'run_start', { mode: 'duel' });
-    return view(stored);
-  }
-
-  // The week's best results of runs started from the chat the game was opened from.
+  // Each player's best result this week among runs started from the chat the game was opened from.
   async chatTop(userId: number, chatInstance: string) {
-    const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const since = new Date(this.now() - 7 * DAY_MS);
     const top = await this.store.chatTop(chatInstance, since, 10);
-    return top.map(({ userId: id, name, bestWins, runs }) => ({ name, bestWins, runs, me: id === userId }));
+    return top.map(({ userId: id, name, won, ticks, kills, runs }) => ({ name, won, ticks, kills, runs, me: id === userId }));
   }
 
   // Shares a finished run as a duel; sharing the same run again returns the same code.
   async share(userId: number, playerName: string, runId: string): Promise<DuelInfo> {
-    const stored = await this.store.getRun(runId);
-    if (!stored || stored.userId !== userId) throw new GameError(404, 'Забег не найден');
-    if (!stored.state.finished) throw new GameError(422, 'Забег ещё не окончен');
+    const run = await this.store.getRun(runId);
+    if (!run || run.userId !== userId) throw new GameError(404, 'Забег не найден');
+    if (!run.finished) throw new GameError(422, 'Забег ещё не окончен');
     const code = newCode();
-    const duel = await this.store.createDuel({
-      code,
-      runId,
-      challengerId: userId,
-      challengerName: playerName,
-      seed: stored.state.seed,
-      wins: stored.state.wins,
-      team: stored.state.team.map(stripUid),
-    });
+    const duel = await this.store.createDuel({ code, runId, challengerId: userId, challengerName: playerName });
     if (duel.code === code) await this.track(userId, 'duel_share');
-    return info(duel);
+    return { ...duel, won: run.won, ticks: run.ticks, kills: run.kills };
   }
 
   async duelInfo(code: string): Promise<DuelInfo> {
-    return info(await this.duel(code));
+    const d = await this.duel(code);
+    return { code: d.code, challengerId: d.challengerId, challengerName: d.challengerName, won: d.run.won, ticks: d.run.ticks, kills: d.run.kills };
   }
 
   inbox(userId: number): Promise<DuelInboxItem[]> {
     return this.store.takeDuelInbox(userId, 10);
   }
 
-  private async duel(code: string): Promise<Duel> {
+  private async duel(code: string) {
     const duel = DUEL_CODE.test(code) ? await this.store.getDuel(code) : null;
     if (!duel) throw new GameError(404, 'Вызов не найден');
     return duel;
   }
-
-  // Replays the player's shop actions on the stored state, then fights a ghost.
-  // The client's own simulation is never trusted.
-  async turn(userId: number, playerName: string, runId: string, version: number, actions: Action[]): Promise<TurnResult> {
-    const stored = await this.store.activeRun(userId);
-    if (!stored || stored.id !== runId) throw new GameError(404, 'Забег не найден');
-    if (stored.version !== version) throw new GameError(409, 'Забег изменился в другом окне');
-
-    const run = new Run(stored.state.seed, stored.state);
-    for (const action of actions) {
-      try {
-        run.apply(action);
-      } catch (e) {
-        if (e instanceof ActionError) throw new GameError(422, e.message);
-        throw e;
-      }
-    }
-    const round = run.s.round;
-    const winsBefore = run.s.wins;
-    const team = run.endTurn();
-    if (team.length === 0) throw new GameError(422, 'Купите хотя бы одного бойца');
-
-    const ghost = await this.store.pickGhost(round, winsBefore, userId, random);
-    const out = run.fight(withUids(ghost?.team ?? []), randomInt(0, 2 ** 31));
-
-    const newVersion = await this.store.saveRun(stored, run.snapshot());
-    if (newVersion === null) throw new GameError(409, 'Забег изменился в другом окне');
-    const { frame } = await this.store.wallet(userId);
-    await this.store.addGhost(round, winsBefore, userId, playerName, team.map(stripUid), frame);
-
-    const result: TurnResult = {
-      run: { id: stored.id, version: newVersion, state: run.snapshot(), duel: stored.duelCode, daily: stored.daily },
-      battle: battleView(out),
-      enemy: { name: ghost?.name ?? 'Пустая арена', frame: ghost?.frame ?? null },
-    };
-    if (!run.s.finished) await this.track(userId, 'turn');
-    if (run.s.finished) {
-      await this.countLeagueRun(userId, run.s.wins);
-      await this.track(userId, 'run_end', { wins: run.s.wins, duel: stored.duelCode !== null, daily: stored.daily !== null });
-    }
-    if (run.s.finished && stored.duelCode) {
-      result.duel = await this.finishDuel(stored, userId, playerName, run.s.wins, team.map(stripUid));
-    }
-    return result;
-  }
-
-  private async finishDuel(stored: StoredRun, userId: number, playerName: string, wins: number, team: GhostUnit[]) {
-    const duel = await this.store.getDuel(stored.duelCode!);
-    if (!duel) return undefined;
-    const battleSeed = randomInt(0, 2 ** 31);
-    const out = battle(withUids(team), withUids(duel.team), battleSeed);
-    await this.store.addDuelResult({ duelCode: duel.code, runId: stored.id, userId, userName: playerName, wins, team, battleSeed, result: out.result });
-    this.notifier?.duelAnswered(duel, playerName, out.result);
-    return { battle: battleView(out), challengerName: duel.challengerName };
-  }
 }
 
-function info(d: Duel): DuelInfo {
-  return { code: d.code, challengerId: d.challengerId, challengerName: d.challengerName, wins: d.wins, team: d.team };
-}
-
-function stripUid({ id, atk, hp, xp }: GhostUnit & { uid?: number }): GhostUnit {
-  return { id, atk, hp, xp };
-}
-
-// Validates the untrusted request body shape; game rules are checked by Run.apply.
-export function parseActions(input: unknown): Action[] {
-  if (!Array.isArray(input) || input.length > MAX_ACTIONS_PER_TURN) throw new GameError(400, 'Неверный список действий');
-  const idx = (v: unknown) => {
-    if (!Number.isInteger(v) || (v as number) < 0 || (v as number) > 20) throw new GameError(400, 'Неверный номер');
-    return v as number;
-  };
-  return input.map((raw): Action => {
-    const a = raw as Record<string, unknown>;
-    switch (a?.a) {
-      case 'buy': return { a: 'buy', shop: idx(a.shop), pos: idx(a.pos) };
-      case 'buyMerge': return { a: 'buyMerge', shop: idx(a.shop), team: idx(a.team) };
-      case 'merge': return { a: 'merge', from: idx(a.from), to: idx(a.to) };
-      case 'sell': return { a: 'sell', team: idx(a.team) };
-      case 'move': return { a: 'move', from: idx(a.from), to: idx(a.to) };
-      case 'reroll': return { a: 'reroll' };
-      case 'freeze': return { a: 'freeze', shop: idx(a.shop) };
-      default: throw new GameError(400, 'Неизвестное действие');
-    }
-  });
-}
-
-// Cold start: bot teams so the first players have someone to fight.
-export async function seedGhosts(store: Store, teamsByRound: Record<string, GhostUnit[][]>): Promise<number> {
-  if ((await store.ghostCount()) > 0) return 0;
-  const rows = Object.entries(teamsByRound).flatMap(([round, teams]) =>
-    teams.map((team) => ({
-      round: Number(round),
-      wins: Math.floor((Number(round) - 1) / 2),
-      name: `Кот #${1000 + randomInt(0, 9000)}`,
-      team,
-    })),
-  );
-  await store.addGhosts(rows);
-  return rows.length;
+// Validates the untrusted request body shape; the replay checks the rest.
+export function parseRecord(body: unknown): RunRecord {
+  const b = body as { moves?: unknown; picks?: unknown } | null;
+  if (typeof b?.moves !== 'string' || typeof b.picks !== 'string') throw new GameError(400, 'Нет записи забега');
+  return { moves: b.moves, picks: b.picks };
 }

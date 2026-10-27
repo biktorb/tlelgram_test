@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import type { Config } from './config.ts';
 import { verifyInitData, type AuthResult } from './auth.ts';
-import { Game, GameError, parseActions, type Notifier } from './game.ts';
+import { Game, GameError, parseRecord, type Notifier } from './game.ts';
 import { TelegramNotifier } from './notify.ts';
 import { CLIENT_EVENTS, computeStats } from './stats.ts';
 import type { Store } from './store.ts';
@@ -21,7 +21,8 @@ export async function buildApp(
   store: Store,
   opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number } = {},
 ): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 64 * 1024, trustProxy: true });
+  // A 20-minute run record is a few tens of kilobytes.
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
   const notifier =
     opts.notifier !== undefined
       ? opts.notifier
@@ -61,23 +62,36 @@ export async function buildApp(
   app.get('/api/me', async (req) => {
     const u = user(req);
     await store.upsertUser(u.id, u.first_name, u.username);
+    await game.track(u.id, 'open');
     return { user: { id: u.id, name: u.first_name }, stats: await store.stats(u.id) };
   });
 
+  // The unfinished run to continue, if any.
   app.get('/api/runs/current', async (req) => {
     const u = user(req);
-    await game.track(u.id, 'open');
-    return { run: await game.current(u.id) };
+    return { current: await game.current(u.id) };
   });
 
-  app.post<{ Body: { duel?: unknown; daily?: unknown } | null }>('/api/runs', async (req) => {
+  app.post<{ Body: { mode?: unknown; duel?: unknown } | null }>('/api/runs', async (req) => {
     const u = user(req);
-    const duel = req.body?.duel;
-    if (duel !== undefined && duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
+    const mode = req.body?.mode ?? 'free';
+    if (mode !== 'free' && mode !== 'daily' && mode !== 'duel') throw new GameError(400, 'Неизвестный режим');
+    const duel = req.body?.duel ?? null;
+    if (duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     await store.upsertUser(u.id, u.first_name, u.username);
-    const chat = req.auth!.chatInstance ?? null;
-    if (req.body?.daily === true) return { run: await game.startDaily(u.id, chat) };
-    return { run: await game.start(u.id, duel ?? null, chat) };
+    return game.start(u.id, u.first_name || 'Игрок', mode, duel, req.auth!.chatInstance ?? null);
+  });
+
+  // Saves the input so far; the run can be continued later.
+  app.post<{ Params: { id: string } }>('/api/runs/:id/progress', async (req, reply) => {
+    const u = user(req);
+    await game.save(u.id, req.params.id, parseRecord(req.body));
+    return reply.status(204).send();
+  });
+
+  app.post<{ Params: { id: string } }>('/api/runs/:id/finish', async (req) => {
+    const u = user(req);
+    return game.finish(u.id, u.first_name || 'Игрок', req.params.id, parseRecord(req.body));
   });
 
   app.get('/api/daily', async (req) => {
@@ -107,7 +121,7 @@ export async function buildApp(
     return computeStats(events, now, days);
   });
 
-  // Fish, frames and today's tasks; finished tasks are paid here.
+  // Fish, auras and today's tasks; finished tasks are paid here.
   app.get('/api/profile', async (req) => {
     const u = user(req);
     await store.upsertUser(u.id, u.first_name, u.username);
@@ -124,7 +138,7 @@ export async function buildApp(
   app.post<{ Body: { item?: unknown } | null }>('/api/shop/equip', async (req) => {
     const u = user(req);
     const item = req.body?.item ?? null;
-    if (item !== null && typeof item !== 'string') throw new GameError(400, 'Неверная рамка');
+    if (item !== null && typeof item !== 'string') throw new GameError(400, 'Неверная аура');
     return { profile: await game.equip(u.id, item) };
   });
 
@@ -157,13 +171,6 @@ export async function buildApp(
   app.get('/api/duels', async (req) => {
     const u = user(req);
     return { results: await game.inbox(u.id) };
-  });
-
-  app.post<{ Params: { id: string }; Body: { version?: unknown; actions?: unknown } }>('/api/runs/:id/turn', async (req) => {
-    const u = user(req);
-    const body = req.body ?? {};
-    if (!Number.isInteger(body.version)) throw new GameError(400, 'Нет версии забега');
-    return game.turn(u.id, u.first_name || 'Игрок', req.params.id, body.version as number, parseActions(body.actions));
   });
 
   if (config.staticDir) {

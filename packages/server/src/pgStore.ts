@@ -1,23 +1,24 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import type { RunState } from '@otryad/core';
 import type { GameEvent } from './stats.ts';
 import {
-  closestGhost,
-  GHOST_CANDIDATES,
+  type Activity,
+  type BuyResult,
+  type ChatEntry,
+  DailyTakenError,
   type Duel,
   type DuelInboxItem,
   type DuelResult,
-  type ChatEntry,
-  type DailyEntry,
-  DailyTakenError,
+  type DuelWithRun,
   type Ghost,
-  type GhostUnit,
-  type BuyResult,
+  ghostOf,
   type LeagueEntry,
   type LeagueRow,
-  type NewRunOptions,
+  type NewRun,
+  type RunOutcome,
+  type RunRecord,
+  type ScoreRow,
   type Store,
   type StoredRun,
   type UserStats,
@@ -25,6 +26,9 @@ import {
 } from './store.ts';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../migrations/', import.meta.url));
+
+// The order of finished runs on every board, as in cats.compareScores; ties go to who finished first.
+const SCORE_ORDER = 'won DESC, ticks DESC, kills DESC, finished_at ASC';
 
 export class PgStore implements Store {
   private pool: pg.Pool;
@@ -72,146 +76,122 @@ export class PgStore implements Store {
     );
   }
 
-  async activeRun(userId: number): Promise<StoredRun | null> {
-    const { rows } = await this.pool.query(
-      `SELECT ${RUN_COLUMNS} FROM runs WHERE user_id = $1 AND NOT finished`,
-      [userId],
-    );
-    return rows[0] ? toRun(rows[0]) : null;
+  async createRun(userId: number, n: NewRun): Promise<StoredRun> {
+    try {
+      const { rows } = await this.pool.query(
+        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${RUN_COLUMNS}`,
+        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null],
+      );
+      return toRun(rows[0]);
+    } catch (e) {
+      if ((e as { constraint?: string }).constraint === 'cat_runs_daily_once') throw new DailyTakenError();
+      throw e;
+    }
   }
 
   async getRun(runId: string): Promise<StoredRun | null> {
     if (!UUID.test(runId)) return null;
-    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = $1`, [runId]);
+    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM cat_runs WHERE id = $1`, [runId]);
     return rows[0] ? toRun(rows[0]) : null;
   }
 
-  async createRun(userId: number, state: RunState, opts: NewRunOptions = {}): Promise<StoredRun> {
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('UPDATE runs SET finished = true, updated_at = now() WHERE user_id = $1 AND NOT finished', [userId]);
-      const { rows } = await client.query(
-        `INSERT INTO runs (user_id, state, finished, wins, duel_code, chat_instance, daily)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${RUN_COLUMNS}`,
-        [userId, state, state.finished, state.wins, opts.duelCode ?? null, opts.chatInstance ?? null, opts.daily ?? null],
-      );
-      await client.query('COMMIT');
-      return toRun(rows[0]);
-    } catch (e) {
-      await client.query('ROLLBACK');
-      if ((e as { constraint?: string }).constraint === 'runs_daily_once') throw new DailyTakenError();
-      throw e;
-    } finally {
-      client.release();
-    }
+  async activeRun(userId: number): Promise<StoredRun | null> {
+    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM cat_runs WHERE user_id = $1 AND finished_at IS NULL`, [userId]);
+    return rows[0] ? toRun(rows[0]) : null;
   }
 
-  async saveRun(run: StoredRun, state: RunState): Promise<number | null> {
-    const { rows } = await this.pool.query(
-      `UPDATE runs SET state = $3, finished = $4, wins = $5, version = version + 1, updated_at = now()
-       WHERE id = $1 AND version = $2 RETURNING version`,
-      [run.id, run.version, state, state.finished, state.wins],
+  async saveProgress(runId: string, record: RunRecord): Promise<boolean> {
+    if (!UUID.test(runId)) return false;
+    const { rowCount } = await this.pool.query(
+      'UPDATE cat_runs SET record = $2, saved_at = now() WHERE id = $1 AND finished_at IS NULL',
+      [runId, record],
     );
-    return rows[0]?.version ?? null;
+    return rowCount === 1;
   }
 
-  async addGhost(round: number, wins: number, userId: number | null, name: string, team: GhostUnit[], frame: string | null = null): Promise<void> {
-    await this.pool.query('INSERT INTO ghosts (round, wins, user_id, name, team, frame) VALUES ($1, $2, $3, $4, $5, $6)', [
-      round,
-      wins,
-      userId,
-      name,
-      JSON.stringify(team),
-      frame,
-    ]);
-  }
-
-  async addGhosts(rows: { round: number; wins: number; name: string; team: GhostUnit[] }[]): Promise<void> {
-    if (rows.length === 0) return;
-    await this.pool.query(
-      `INSERT INTO ghosts (round, wins, user_id, name, team)
-       SELECT * FROM jsonb_to_recordset($1::jsonb) AS t(round int, wins int, user_id bigint, name text, team jsonb)`,
-      [JSON.stringify(rows.map((r) => ({ ...r, user_id: null })))],
+  async finishRun(runId: string, o: RunOutcome, record: RunRecord): Promise<boolean> {
+    if (!UUID.test(runId)) return false;
+    const { rowCount } = await this.pool.query(
+      `UPDATE cat_runs SET finished_at = clock_timestamp(), won = $2, ticks = $3, kills = $4, level = $5, points = $6, record = $7
+       WHERE id = $1 AND finished_at IS NULL`,
+      [runId, o.won, o.ticks, o.kills, o.level, o.points, record],
     );
-  }
-
-  async pickGhost(round: number, wins: number, excludeUserId: number, random: () => number): Promise<Ghost | null> {
-    const { rows } = await this.pool.query<{ wins: number; name: string; team: GhostUnit[]; frame: string | null }>(
-      `SELECT wins, name, team, frame FROM ghosts
-       WHERE round = $1 AND user_id IS DISTINCT FROM $2
-       ORDER BY id DESC LIMIT ${GHOST_CANDIDATES}`,
-      [round, excludeUserId],
-    );
-    const g = closestGhost(rows, wins, random);
-    return g ? { name: g.name, team: g.team, frame: g.frame } : null;
-  }
-
-  async ghostCount(): Promise<number> {
-    const { rows } = await this.pool.query<{ n: string }>('SELECT count(*) AS n FROM ghosts');
-    return Number(rows[0].n);
-  }
-
-  async createDuel(duel: Duel): Promise<Duel> {
-    await this.pool.query(
-      `INSERT INTO duels (code, run_id, challenger_id, challenger_name, seed, wins, team)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (run_id) DO NOTHING`,
-      [duel.code, duel.runId, duel.challengerId, duel.challengerName, duel.seed, duel.wins, JSON.stringify(duel.team)],
-    );
-    const { rows } = await this.pool.query(`SELECT ${DUEL_COLUMNS} FROM duels WHERE run_id = $1`, [duel.runId]);
-    return toDuel(rows[0]);
-  }
-
-  async getDuel(code: string): Promise<Duel | null> {
-    const { rows } = await this.pool.query(`SELECT ${DUEL_COLUMNS} FROM duels WHERE code = $1`, [code]);
-    return rows[0] ? toDuel(rows[0]) : null;
-  }
-
-  async addDuelResult(r: DuelResult): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO duel_results (duel_code, run_id, user_id, user_name, wins, team, battle_seed, result)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (run_id) DO NOTHING`,
-      [r.duelCode, r.runId, r.userId, r.userName, r.wins, JSON.stringify(r.team), r.battleSeed, r.result],
-    );
-  }
-
-  async takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]> {
-    const { rows } = await this.pool.query<{ id: string; user_name: string; wins: number; result: DuelInboxItem['result']; seen: boolean }>(
-      `SELECT r.id, r.user_name, r.wins, r.result, r.seen FROM duel_results r JOIN duels d ON d.code = r.duel_code
-       WHERE d.challenger_id = $1 ORDER BY r.id DESC LIMIT $2`,
-      [challengerId, limit],
-    );
-    const unseen = rows.filter((r) => !r.seen).map((r) => r.id);
-    if (unseen.length) await this.pool.query('UPDATE duel_results SET seen = true WHERE id = ANY($1::bigint[])', [unseen]);
-    return rows.map((r) => ({ userName: r.user_name, wins: r.wins, result: r.result, isNew: !r.seen }));
+    return rowCount === 1;
   }
 
   async dailyRun(userId: number, date: string): Promise<StoredRun | null> {
-    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM runs WHERE user_id = $1 AND daily = $2`, [userId, date]);
+    const { rows } = await this.pool.query(`SELECT ${RUN_COLUMNS} FROM cat_runs WHERE user_id = $1 AND daily = $2`, [userId, date]);
     return rows[0] ? toRun(rows[0]) : null;
   }
 
-  async dailyTop(date: string, limit: number): Promise<DailyEntry[]> {
-    const { rows } = await this.pool.query<{ user_id: string; name: string; wins: number; lives: number }>(
-      `SELECT r.user_id, u.first_name AS name, r.wins, (r.state->>'lives')::int AS lives
-       FROM runs r JOIN users u ON u.id = r.user_id
-       WHERE r.daily = $1 AND r.finished
-       ORDER BY r.wins DESC, lives DESC, r.updated_at ASC LIMIT $2`,
+  async dailyTop(date: string, limit: number): Promise<ScoreRow[]> {
+    const { rows } = await this.pool.query<ScoreSqlRow>(
+      `SELECT r.user_id, u.first_name AS name, r.won, r.ticks, r.kills
+       FROM cat_runs r JOIN users u ON u.id = r.user_id
+       WHERE r.daily = $1 AND r.finished_at IS NOT NULL
+       ORDER BY ${SCORE_ORDER} LIMIT $2`,
       [date, limit],
     );
-    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, wins: r.wins, lives: r.lives }));
+    return rows.map(toScore);
   }
 
   async dailyRank(userId: number, date: string): Promise<number | null> {
     const { rows } = await this.pool.query<{ rank: string }>(
-      `WITH me AS (SELECT wins, (state->>'lives')::int AS lives, updated_at FROM runs WHERE user_id = $1 AND daily = $2 AND finished)
-       SELECT 1 + count(*) AS rank FROM runs r, me
-       WHERE r.daily = $2 AND r.finished AND r.user_id <> $1
-         AND (r.wins, (r.state->>'lives')::int, me.updated_at) > (me.wins, me.lives, r.updated_at)
-       HAVING (SELECT count(*) FROM me) > 0`,
+      `WITH me AS (SELECT won, ticks, kills, finished_at FROM cat_runs WHERE user_id = $1 AND daily = $2 AND finished_at IS NOT NULL)
+       SELECT 1 + count(*) FILTER (WHERE r.user_id IS NOT NULL) AS rank
+       FROM me LEFT JOIN cat_runs r
+         ON r.daily = $2 AND r.finished_at IS NOT NULL AND r.user_id <> $1
+        AND (r.won, r.ticks, r.kills, me.finished_at) > (me.won, me.ticks, me.kills, r.finished_at)
+       GROUP BY me.won`,
       [userId, date],
     );
     return rows[0] ? Number(rows[0].rank) : null;
+  }
+
+  async dailyGhost(date: string, excludeUserId: number): Promise<Ghost | null> {
+    const { rows } = await this.pool.query(
+      `SELECT ${RUN_COLUMNS}, u.first_name AS name FROM cat_runs JOIN users u ON u.id = cat_runs.user_id
+       WHERE daily = $1 AND finished_at IS NOT NULL AND user_id <> $2
+       ORDER BY ${SCORE_ORDER} LIMIT 1`,
+      [date, excludeUserId],
+    );
+    return rows[0] ? ghostOf(toRun(rows[0]), rows[0].name) : null;
+  }
+
+  async createDuel(duel: Duel): Promise<Duel> {
+    await this.pool.query(
+      `INSERT INTO cat_duels (code, run_id, challenger_id, challenger_name) VALUES ($1, $2, $3, $4) ON CONFLICT (run_id) DO NOTHING`,
+      [duel.code, duel.runId, duel.challengerId, duel.challengerName],
+    );
+    const { rows } = await this.pool.query('SELECT code, run_id, challenger_id, challenger_name FROM cat_duels WHERE run_id = $1', [duel.runId]);
+    return toDuel(rows[0]);
+  }
+
+  async getDuel(code: string): Promise<DuelWithRun | null> {
+    const { rows } = await this.pool.query('SELECT code, run_id, challenger_id, challenger_name FROM cat_duels WHERE code = $1', [code]);
+    if (!rows[0]) return null;
+    const run = await this.getRun(rows[0].run_id);
+    return run ? { ...toDuel(rows[0]), run } : null;
+  }
+
+  async addDuelResult(r: DuelResult): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO cat_duel_results (duel_code, run_id, user_id, user_name, won, ticks, kills, beat)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (run_id) DO NOTHING`,
+      [r.duelCode, r.runId, r.userId, r.userName, r.won, r.ticks, r.kills, r.beat],
+    );
+  }
+
+  async takeDuelInbox(challengerId: number, limit: number): Promise<DuelInboxItem[]> {
+    const { rows } = await this.pool.query<{ id: string; user_name: string; won: boolean; ticks: number; kills: number; beat: boolean; seen: boolean }>(
+      `SELECT r.id, r.user_name, r.won, r.ticks, r.kills, r.beat, r.seen FROM cat_duel_results r JOIN cat_duels d ON d.code = r.duel_code
+       WHERE d.challenger_id = $1 ORDER BY r.id DESC LIMIT $2`,
+      [challengerId, limit],
+    );
+    const unseen = rows.filter((r) => !r.seen).map((r) => r.id);
+    if (unseen.length) await this.pool.query('UPDATE cat_duel_results SET seen = true WHERE id = ANY($1::bigint[])', [unseen]);
+    return rows.map((r) => ({ userName: r.user_name, won: r.won, ticks: r.ticks, kills: r.kills, beat: r.beat, isNew: !r.seen }));
   }
 
   async leagueEntry(userId: number, week: string): Promise<LeagueEntry | null> {
@@ -270,28 +250,31 @@ export class PgStore implements Store {
   }
 
   async chatTop(chatInstance: string, since: Date, limit: number): Promise<ChatEntry[]> {
-    const { rows } = await this.pool.query<{ user_id: string; name: string; best: number; runs: string }>(
-      `SELECT r.user_id, u.first_name AS name, max(r.wins) AS best, count(*) AS runs
-       FROM runs r JOIN users u ON u.id = r.user_id
-       WHERE r.chat_instance = $1 AND r.updated_at >= $2
-       GROUP BY r.user_id, u.first_name
-       ORDER BY best DESC, runs DESC LIMIT $3`,
+    const { rows } = await this.pool.query<ScoreSqlRow & { runs: string }>(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (r.user_id) r.user_id, u.first_name AS name, r.won, r.ticks, r.kills, r.finished_at,
+                count(*) OVER (PARTITION BY r.user_id) AS runs
+         FROM cat_runs r JOIN users u ON u.id = r.user_id
+         WHERE r.chat_instance = $1 AND r.finished_at >= $2
+         ORDER BY r.user_id, ${SCORE_ORDER}
+       ) best ORDER BY ${SCORE_ORDER} LIMIT $3`,
       [chatInstance, since, limit],
     );
-    return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, bestWins: r.best, runs: Number(r.runs) }));
+    return rows.map((r) => ({ ...toScore(r), runs: Number(r.runs) }));
   }
 
   async stats(userId: number): Promise<UserStats> {
-    const { rows } = await this.pool.query<{ runs: string; best: number | null; full: string }>(
-      `SELECT count(*) AS runs, max(wins) AS best,
-              count(*) FILTER (WHERE finished AND (state->>'lives')::int > 0) AS full
-       FROM runs WHERE user_id = $1`,
+    const { rows } = await this.pool.query<{ runs: string; wins: string }>(
+      'SELECT count(*) AS runs, count(*) FILTER (WHERE won) AS wins FROM cat_runs WHERE user_id = $1 AND finished_at IS NOT NULL',
       [userId],
     );
-    return { runs: Number(rows[0].runs), bestWins: rows[0].best ?? 0, fullRuns: Number(rows[0].full) };
+    const best = await this.pool.query<{ won: boolean; ticks: number; kills: number }>(
+      `SELECT won, ticks, kills FROM cat_runs WHERE user_id = $1 AND finished_at IS NOT NULL ORDER BY ${SCORE_ORDER} LIMIT 1`,
+      [userId],
+    );
+    return { runs: Number(rows[0].runs), wins: Number(rows[0].wins), best: best.rows[0] ?? null };
   }
 
-  // Test helper: empties all game tables.
   async wallet(userId: number): Promise<Wallet> {
     const { rows } = await this.pool.query<{ fish: number; frame: string | null; owned: string[] }>(
       `SELECT u.fish, u.frame, coalesce(array_agg(i.item ORDER BY i.created_at) FILTER (WHERE i.item IS NOT NULL), '{}') AS owned
@@ -302,12 +285,12 @@ export class PgStore implements Store {
     return rows[0] ?? { fish: 0, frame: null, owned: [] };
   }
 
-  async dayActivity(userId: number, since: Date): Promise<{ runs: number; wins: number }> {
-    const { rows } = await this.pool.query<{ runs: string; wins: string | null }>(
-      `SELECT count(*) AS runs, sum(wins) AS wins FROM runs WHERE user_id = $1 AND (state->>'finished')::boolean AND updated_at >= $2`,
+  async activity(userId: number, since: Date): Promise<Activity> {
+    const { rows } = await this.pool.query<{ runs: string; ticks: string | null; points: string | null }>(
+      'SELECT count(*) AS runs, sum(ticks) AS ticks, sum(points) AS points FROM cat_runs WHERE user_id = $1 AND finished_at >= $2',
       [userId, since],
     );
-    return { runs: Number(rows[0].runs), wins: Number(rows[0].wins ?? 0) };
+    return { runs: Number(rows[0].runs), ticks: Number(rows[0].ticks ?? 0), points: Number(rows[0].points ?? 0) };
   }
 
   async claimedTasks(userId: number, day: string): Promise<string[]> {
@@ -366,8 +349,11 @@ export class PgStore implements Store {
     return rows.map((r) => ({ userId: Number(r.user_id), name: r.name, data: r.data, at: r.at.getTime() }));
   }
 
+  // Test helper: empties all game tables.
   async reset(): Promise<void> {
-    await this.pool.query('TRUNCATE events, task_claims, user_items, league_weeks, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE');
+    await this.pool.query(
+      'TRUNCATE events, task_claims, user_items, league_weeks, cat_duel_results, cat_duels, cat_runs, duel_results, duels, ghosts, runs, users RESTART IDENTITY CASCADE',
+    );
   }
 
   async close(): Promise<void> {
@@ -376,48 +362,58 @@ export class PgStore implements Store {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const RUN_COLUMNS = "id, user_id, version, state, finished, duel_code, to_char(daily, 'YYYY-MM-DD') AS daily";
+const RUN_COLUMNS =
+  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, started_at, finished_at, won, ticks, kills, level, points, record";
 const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
-const DUEL_COLUMNS = 'code, run_id, challenger_id, challenger_name, seed, wins, team';
+
+interface ScoreSqlRow {
+  user_id: string | number;
+  name: string;
+  won: boolean;
+  ticks: number;
+  kills: number;
+}
+
+const toScore = (r: ScoreSqlRow): ScoreRow => ({ userId: Number(r.user_id), name: r.name, won: r.won, ticks: r.ticks, kills: r.kills });
 
 function toRun(row: {
   id: string;
   user_id: string | number;
-  version: number;
-  state: RunState;
-  finished: boolean;
-  duel_code: string | null;
+  seed: string | number;
+  mode: StoredRun['mode'];
   daily: string | null;
+  duel_code: string | null;
+  aura: string | null;
+  started_at: Date;
+  finished_at: Date | null;
+  won: boolean;
+  ticks: number;
+  kills: number;
+  level: number;
+  points: number;
+  record: RunRecord | null;
 }): StoredRun {
   return {
     id: row.id,
     userId: Number(row.user_id),
-    version: row.version,
-    state: row.state,
-    finished: row.finished,
-    duelCode: row.duel_code,
+    seed: Number(row.seed),
+    mode: row.mode,
     daily: row.daily,
+    duelCode: row.duel_code,
+    aura: row.aura,
+    startedAt: row.started_at.getTime(),
+    finished: row.finished_at !== null,
+    won: row.won,
+    ticks: row.ticks,
+    kills: row.kills,
+    level: row.level,
+    points: row.points,
+    record: row.record,
   };
 }
 
-function toDuel(row: {
-  code: string;
-  run_id: string;
-  challenger_id: string | number;
-  challenger_name: string;
-  seed: string | number;
-  wins: number;
-  team: GhostUnit[];
-}): Duel {
-  return {
-    code: row.code,
-    runId: row.run_id,
-    challengerId: Number(row.challenger_id),
-    challengerName: row.challenger_name,
-    seed: Number(row.seed),
-    wins: row.wins,
-    team: row.team,
-  };
+function toDuel(row: { code: string; run_id: string; challenger_id: string | number; challenger_name: string }): Duel {
+  return { code: row.code, runId: row.run_id, challengerId: Number(row.challenger_id), challengerName: row.challenger_name };
 }
 
 function toEntry(row: {

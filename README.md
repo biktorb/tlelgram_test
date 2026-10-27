@@ -11,7 +11,7 @@
 - `packages/core` — правила игры: бой, лавка, бойцы. Один код для клиента и сервера.
 - `packages/client` — игра (Vite), работает в Telegram и в браузере, онлайн и офлайн.
 - `packages/server` — сервер: вход через Telegram, забеги, бои, соперники (Fastify + PostgreSQL).
-- `tools/balance.ts` — симуляция баланса ботами, `tools/ghosts.ts` — стартовые отряды-боты, `tools/load.ts` — нагрузочная проверка сервера.
+- `tools/cats-balance.ts` — баланс по забегам ботов (`npm run balance:cats`), `tools/load.ts` — нагрузочная проверка сервера.
 
 ## Команды
 

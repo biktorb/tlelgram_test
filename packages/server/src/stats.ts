@@ -13,7 +13,7 @@ export const CLIENT_EVENTS = new Set(['share_chat', 'share_story', 'open_store']
 
 const DAY_MS = 24 * 3600 * 1000;
 const OFFSET_MS = 3 * 3600 * 1000; // Moscow days, like the rest of the game
-const SESSION_GAP_MS = 5 * 60 * 1000; // a longer pause starts a new session
+const SESSION_GAP_MS = 25 * 60 * 1000; // a longer pause starts a new session; a run lasts up to 20 minutes
 
 const dayOf = (at: number) => new Date(at + OFFSET_MS).toISOString().slice(0, 10);
 const addDays = (day: string, n: number) => new Date(Date.parse(day) + n * DAY_MS).toISOString().slice(0, 10);

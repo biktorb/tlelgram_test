@@ -1,12 +1,10 @@
-import type { BattleResult } from '@otryad/core';
 import type { Notifier } from './game.ts';
 import type { Duel } from './store.ts';
 
-const TEXT: Record<BattleResult, (friend: string) => string> = {
-  win: (f) => `${f} принял ваш вызов в «Отряде» и победил ваш отряд. Сыграйте ещё раз и отправьте новый вызов!`,
-  loss: (f) => `${f} принял ваш вызов в «Отряде», но ваш отряд победил 💪`,
-  draw: (f) => `${f} принял ваш вызов в «Отряде». Ничья!`,
-};
+const text = (friend: string, beat: boolean) =>
+  beat
+    ? `${friend} принял ваш вызов в «Котах против пылесосов» и продержался лучше вас. Сыграйте ещё раз и отправьте новый вызов!`
+    : `${friend} принял ваш вызов в «Котах против пылесосов», но ваш кот продержался лучше 💪`;
 
 // Sends the challenger a private message from the bot. Telegram refuses it when
 // the player never opened a chat with the bot; the in-game inbox covers that case.
@@ -23,8 +21,8 @@ export class TelegramNotifier implements Notifier {
     this.log = log;
   }
 
-  duelAnswered(duel: Duel, friendName: string, friendResult: BattleResult): void {
-    const body: Record<string, unknown> = { chat_id: duel.challengerId, text: TEXT[friendResult](friendName) };
+  duelAnswered(duel: Duel, friendName: string, beat: boolean): void {
+    const body: Record<string, unknown> = { chat_id: duel.challengerId, text: text(friendName, beat) };
     if (this.appLink) body.reply_markup = { inline_keyboard: [[{ text: 'Играть', url: this.appLink }]] };
     fetch(`${this.apiBase}/bot${this.token}/sendMessage`, {
       method: 'POST',

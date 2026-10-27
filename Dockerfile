@@ -19,7 +19,6 @@ COPY package.json ./
 COPY --from=build /app/node_modules node_modules
 COPY packages/core packages/core
 COPY packages/server packages/server
-COPY packages/client/src/ghosts.json packages/client/src/ghosts.json
 COPY --from=build /app/packages/client/dist packages/client/dist
 ENV STATIC_DIR=/app/packages/client/dist PORT=3000
 EXPOSE 3000

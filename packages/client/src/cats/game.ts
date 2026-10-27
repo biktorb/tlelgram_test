@@ -1,7 +1,7 @@
 import { cats } from '@otryad/core';
 import { flashSprite, sprite, type SpriteId } from './sprites.ts';
 
-const { CatRun, DT, Recorder, decodeMoves, dirFromVector } = cats;
+const { CatRun, DT, Recorder, decodeMoves, dirFromVector, resume } = cats;
 type CatRun = InstanceType<typeof cats.CatRun>;
 type SimEvent = cats.SimEvent;
 type UpgradeId = cats.UpgradeId;
@@ -13,6 +13,13 @@ export interface GameHooks {
   onEnd(run: CatRun, record: RunRecord): void;
   onHud(run: CatRun, ghost: CatRun | null): void;
   onEvent?(e: SimEvent): void;
+  // Every half a minute of play, to save the progress.
+  onCheckpoint?(): void;
+}
+
+export interface GameOptions {
+  ghost?: RunRecord; // a run to race against, from the same seed
+  progress?: RunRecord; // input of an unfinished run, to continue it
 }
 
 interface Particle {
@@ -108,16 +115,20 @@ export class Game {
   private keys = new Set<string>();
   private cleanup: (() => void)[] = [];
 
-  constructor(cv: HTMLCanvasElement, seed: number, hooks: GameHooks, ghost?: RunRecord) {
+  constructor(cv: HTMLCanvasElement, seed: number, hooks: GameHooks, opts: GameOptions = {}) {
     this.cv = cv;
     this.ctx = cv.getContext('2d')!;
     this.hooks = hooks;
-    this.rec = new Recorder(new CatRun(seed));
-    this.ghost = ghost ? new Ghost(seed, ghost) : null;
+    this.rec = opts.progress ? resume(seed, opts.progress) : new Recorder(new CatRun(seed));
+    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost) : null;
+    // The ghost catches up with a continued run: one ghost step per tick played.
+    for (let i = 0; i < this.run.tick; i++) this.ghost?.step();
+    this.prevPlayer = [this.run.player.x, this.run.player.y];
     this.bind();
     this.resize();
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.frame);
+    if (this.run.pending) this.offer();
   }
 
   get run(): CatRun {
@@ -246,6 +257,7 @@ export class Game {
       }
     }
     for (const e of run.events) this.effect(e);
+    if (run.tick % (30 * cats.TICK_RATE) === 0) this.hooks.onCheckpoint?.();
     if (run.over) {
       this.ended = true;
       this.hooks.onEnd(run, this.rec.record());
