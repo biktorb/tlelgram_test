@@ -103,3 +103,38 @@ html, body {
 .up .ico.emoji { font-size: 20px; line-height: 26px; }
 .up b { font-size: 14px; }
 .credit { position: absolute; bottom: calc(10px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); text-decoration: none; }
+
+/* Menu tiles and the server screens. */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(320px, 100%); }
+.tile {
+  padding: 10px 8px; border-radius: 14px; border: 2px solid var(--line);
+  background: var(--card); color: var(--ink); font: 800 14px system-ui; box-shadow: 0 3px 0 var(--line); cursor: pointer;
+}
+.tile:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--line); }
+.overlay.page { justify-content: flex-start; padding-top: max(24px, calc(var(--tg-content-safe-area-inset-top, 0px) + var(--tg-safe-area-inset-top, 0px) + 16px)); }
+.panel { display: flex; flex-direction: column; align-items: center; gap: 10px; width: min(360px, 100%); }
+.panel h2 { margin: 8px 0 0; font-size: 18px; }
+.overlay .error { color: var(--hp); font-weight: 700; }
+.board, .tasks { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.board { counter-reset: place; }
+.board li, .tasks li { display: flex; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--card); border: 2px solid var(--line); font-size: 14px; }
+.board li::before { counter-increment: place; content: counter(place) '.'; font-weight: 900; color: var(--muted); }
+.board li.me { background: #ffe7d3; }
+.board .name { flex: 1; font-weight: 800; }
+.board .score { color: var(--muted); white-space: nowrap; }
+.tasks li.done { color: var(--muted); }
+.tasks li.new { background: #ffe7d3; }
+.shop { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+.item { padding: 10px 6px; border-radius: 12px; border: 3px solid var(--aura, var(--line)); background: var(--card); color: var(--ink); font: 700 13px system-ui; cursor: pointer; }
+.item.on { background: #ffe7d3; }
+.item:disabled { opacity: .55; }
+.aura-gold { --aura: #f5b700; }
+.aura-mint { --aura: #3ccf9e; }
+.aura-neon { --aura: #ff3df2; }
+.aura-rainbow { --aura: #ff6b3d; }
+.aura-cosmos { --aura: #5a4cff; }
+.aura-crown { --aura: #c99a2e; }
+.toast {
+  position: absolute; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  max-width: 320px; padding: 10px 16px; border-radius: 12px; background: var(--ink); color: #fff; font-weight: 700; z-index: 10;
+}

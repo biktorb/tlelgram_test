@@ -97,6 +97,24 @@ export function replay(seed: number, rec: RunRecord, opts: { events?: boolean } 
   return run;
 }
 
+// Rebuilds a run from saved progress to continue it: unlike replay, it stops
+// where the input ends, possibly with an upgrade choice pending.
+export function resume(seed: number, rec: RunRecord, opts: { events?: boolean } = {}): Recorder {
+  const dirs = decodeMoves(rec.moves);
+  const r = new Recorder(new CatRun(seed, { events: opts.events ?? true }));
+  let pick = 0;
+  let i = 0;
+  while (!r.run.over) {
+    if (r.run.pending) {
+      if (pick >= rec.picks.length) break;
+      r.choose(Number(rec.picks[pick++]));
+    } else if (i < dirs.length) r.step(dirs[i++]);
+    else break;
+  }
+  r.run.events.length = 0;
+  return r;
+}
+
 // Joystick vector to a direction code. Dead zone below `dead` of full tilt.
 export function dirFromVector(x: number, y: number, dead = 0.15): number {
   if (x * x + y * y < dead * dead) return 0;

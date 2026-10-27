@@ -83,3 +83,27 @@ test('joystick vectors map to the nearest direction', () => {
   assert.equal(dirFromVector(-1, 0), 9);
   assert.equal(dirFromVector(0, -1), 13);
 });
+
+test('a run stopped halfway continues to the same result', () => {
+  const full = playBot(11, BOT_STYLES.mixed, BOT_SKILLS.casual);
+  const rec = full.record();
+  // The same input in two parts: stop after 2000 ticks, save, continue.
+  const dirs = decodeMoves(rec.moves);
+  const first = new Recorder(new CatRun(11));
+  let i = 0;
+  let pick = 0;
+  const feed = (r: InstanceType<typeof Recorder>, until: number) => {
+    while (!r.run.over && i < until) {
+      if (r.run.pending) r.choose(Number(rec.picks[pick++]));
+      else r.step(dirs[i++]);
+    }
+  };
+  feed(first, 2000);
+  const saved = first.record();
+  const second = cats.resume(11, saved);
+  assert.equal(second.run.tick, first.run.tick);
+  feed(second, dirs.length);
+  while (second.run.pending) second.choose(Number(rec.picks[pick++]));
+  assert.deepEqual(second.run.result(), full.run.result());
+  assert.deepEqual(replay(11, second.record()).result(), full.run.result(), 'the joined record replays the same');
+});
