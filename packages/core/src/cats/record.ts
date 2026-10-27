@@ -1,4 +1,4 @@
-import { CatRun, DIRECTIONS, RUN_TICKS } from './sim.ts';
+import { CatRun, DIRECTIONS, END_TICKS } from './sim.ts';
 
 // A run is stored as its input only: the joystick direction of every tick
 // and the upgrade picked on every level-up. Replaying it on the same seed
@@ -68,7 +68,7 @@ export class Recorder {
 }
 
 // Expands "a12c3d" to one direction per tick. Throws on malformed input.
-export function decodeMoves(moves: string, maxTicks = RUN_TICKS): number[] {
+export function decodeMoves(moves: string, maxTicks = END_TICKS): number[] {
   const out: number[] = [];
   const re = /([a-q])(\d*)/gy;
   let m: RegExpExecArray | null;

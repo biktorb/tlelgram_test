@@ -2,7 +2,7 @@
 // level up to 8, passives up to 5, and passives change the cat's stats that
 // every weapon reads. Numbers are tuned with `npm run balance:cats`.
 
-export type EnemyKind = 'mouse' | 'dust' | 'robot' | 'bigrobot' | 'mop';
+export type EnemyKind = 'mouse' | 'dust' | 'robot' | 'bigrobot' | 'mop' | 'cleaner';
 
 export interface EnemyDef {
   name: string;
@@ -23,6 +23,8 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 80, dmg: 7, xp: 1.5, move: 'chase' },
   robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 145, dmg: 7, xp: 2.5, move: 'charge' },
   bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 85, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
+  // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
+  cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 230, dmg: 99999, xp: 0, move: 'chase' },
   mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },
 };
 

@@ -72,7 +72,7 @@ test('moves are run-length encoded and checked', () => {
   assert.throws(() => decodeMoves('z'));
   assert.throws(() => decodeMoves('a0'));
   assert.throws(() => decodeMoves('3a'));
-  assert.throws(() => decodeMoves(`a${RUN_TICKS + 1}`));
+  assert.throws(() => decodeMoves(`a${cats.END_TICKS + 1}`));
   assert.throws(() => replay(1, { moves: 'a', picks: 'x' }));
 });
 
@@ -167,4 +167,23 @@ test('furniture is the same for a seed and the cat cannot walk through it', () =
   const f = all[0];
   const [x, y] = a.pushOut(f.x + f.w / 2, f.y + 1, 14);
   assert.ok(x <= f.x - 14 + 1e-9 || x >= f.x + f.w + 14 - 1e-9 || y <= f.y - 14 + 1e-9 || y >= f.y + f.h + 14 - 1e-9);
+});
+
+test('at 20:00 the room is won and the Cleaner ends the run', () => {
+  const run = new CatRun(8, { events: false });
+  while (!run.over && run.tick < cats.RUN_TICKS) {
+    if (run.pending) run.choose(0);
+    else {
+      run.player.inv = 10; // untouchable until 20:00
+      run.step(0);
+    }
+  }
+  assert.equal(run.over, false);
+  assert.ok(run.enemies.every((e) => e.kind === 'cleaner'));
+  while (!run.over) {
+    if (run.pending) run.choose(0);
+    else run.step(0);
+  }
+  assert.equal(run.won, true);
+  assert.ok(run.tick > cats.RUN_TICKS && run.tick < cats.END_TICKS, 'she catches a cat that stands still');
 });

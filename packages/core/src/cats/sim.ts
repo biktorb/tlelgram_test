@@ -30,6 +30,10 @@ export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
 export const RUN_TICKS = RUN_SECONDS * TICK_RATE;
+const MINUTE_TICKS = 60 * TICK_RATE;
+// At 20:00 the room is won and the Cleaner comes, one more every minute;
+// the run goes on until she catches the cat, at most this long.
+export const END_TICKS = RUN_TICKS + 10 * MINUTE_TICKS;
 const MINUTE = 60 * TICK_RATE;
 export const BOSS_TICK = 18 * MINUTE;
 export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
@@ -175,6 +179,7 @@ export type SimEvent =
   | { t: 'hurt'; dmg: number }
   | { t: 'level' }
   | { t: 'boss' }
+  | { t: 'cleaner' }
   | { t: 'elite' }
   | { t: 'slash'; x: number; y: number; w: number; h: number; face: 1 | -1 }
   | { t: 'wave'; x: number; y: number; r: number }
@@ -360,7 +365,7 @@ export class CatRun {
     compact(this.zones, (z) => z.life > 0);
     compact(this.gems, (g) => !g.got);
     compact(this.pickups, (g) => !g.got);
-    if (!this.over && this.tick >= RUN_TICKS) this.finish(true);
+    if (!this.over && this.tick >= END_TICKS) this.finish(true);
   }
 
   choose(index: number): void {
@@ -385,9 +390,10 @@ export class CatRun {
   private finish(won: boolean): void {
     if (this.over) return;
     this.over = true;
-    this.won = won;
+    // Caught by the Cleaner after 20:00 is still a win.
+    this.won = won || this.tick >= RUN_TICKS;
     this.pending = null;
-    this.emit({ t: 'end', won });
+    this.emit({ t: 'end', won: this.won });
   }
 
   // ---------- spawning ----------
@@ -448,6 +454,15 @@ export class CatRun {
   }
 
   private spawner(): void {
+    if (this.tick >= RUN_TICKS) {
+      if (this.tick === RUN_TICKS) {
+        // The room is cleared: every enemy goes, and the Cleaner comes.
+        for (const en of this.enemies) en.dead = true;
+        this.emit({ t: 'cleaner' });
+      }
+      if ((this.tick - RUN_TICKS) % MINUTE_TICKS === 0) this.spawn('cleaner', true);
+      return;
+    }
     // Keep a crowd around the cat, growing over the run.
     const crowd = Math.round(CROWD[Math.min(CROWD.length - 1, Math.floor(this.time / 60))] * BALANCE.crowdScale);
     let n = 0;
@@ -492,7 +507,7 @@ export class CatRun {
   // ---------- combat ----------
   // `heal` is health the cat gets back for the hit (evolved claws and meow).
   private hit(en: Enemy, dmg: number, kx: number, ky: number, heal = 0): void {
-    if (en.dead) return;
+    if (en.dead || en.kind === 'cleaner') return;
     if (heal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
     en.hp -= dmg;
     en.hitTick = this.tick;

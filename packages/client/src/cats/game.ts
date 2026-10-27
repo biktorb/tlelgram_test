@@ -87,7 +87,7 @@ class Ghost {
   }
 }
 
-const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = { mouse: 'mouse', dust: 'dust', robot: 'vacuum', bigrobot: 'vacuum', mop: 'boss' };
+const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = { mouse: 'mouse', dust: 'dust', robot: 'vacuum', bigrobot: 'vacuum', mop: 'boss', cleaner: 'cleaner' };
 const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟', chest: '🎁' };
 const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟', chest: '' };
 const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
@@ -337,6 +337,10 @@ export class Game {
       case 'boss':
         this.text(this.run.player.x, this.run.player.y - 70, 'Идёт Швабра!', '#ff6b6b', 30);
         this.shake = 12;
+        break;
+      case 'cleaner':
+        this.text(this.run.player.x, this.run.player.y - 70, '20:00! Пришла Уборщица, беги!', '#ff6b6b', 22, 2.5);
+        this.shake = 16;
         break;
       case 'elite':
         this.text(this.run.player.x, this.run.player.y - 70, 'Большой робот!', '#ff9f43', 24);
