@@ -64,7 +64,8 @@ export function botMove(run: CatRun, style: BotStyle): number {
     let close = Infinity;
     // The claws hit the side the cat faces: turning to the swarm pays.
     const face = mx > 0.01 ? 1 : mx < -0.01 ? -1 : p.face;
-    const claws = run.lvl('claws') > 0;
+    // Worth a lot just before the claws strike, little otherwise.
+    const clawsValue = run.lvl('claws') > 0 ? (run.readyIn('claws') <= LOOK * 30 ? 6 : 0.5) : 0;
     for (const en of run.enemies) {
       let dx = qx - en.x;
       let dy = qy - en.y;
@@ -81,7 +82,7 @@ export function botMove(run: CatRun, style: BotStyle): number {
       const reach = style.fear + en.r + p.r;
       if (d < reach) score -= en.dmg * care * (1 + ((reach - d) / reach) * 4);
       if (d < close) close = d;
-      if (claws && Math.abs(ex - (qx + face * 70)) < 65 + en.r && Math.abs(ey - qy) < 17 + en.r) score += 2.5;
+      if (clawsValue && Math.abs(ex - (qx + face * 70)) < 65 + en.r && Math.abs(ey - qy) < 17 + en.r) score += clawsValue;
     }
     // Stay near the swarm rather than run off.
     if (close < Infinity && close > style.fear * 2) score -= (close - style.fear * 2) * 0.02;
