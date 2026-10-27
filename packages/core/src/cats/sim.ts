@@ -65,7 +65,6 @@ export const BALANCE = {
   crowdScale: 1.3, // multiplies the fewest enemies of every minute (CROWD)
   burstEvery: 1.2, // seconds between extra spawns
   speedPerMin: 0.025, // enemies get this much faster every minute, up to 15
-  meowPush: 90, // knockback of the meow aura
   xpPerMin: 0.15, // gems grow by this share every minute, as levels get dearer
 };
 
@@ -115,7 +114,8 @@ export interface Enemy {
   elite: boolean;
   dead: boolean;
   hitTick: number;
-  yarnTick: number; // ticks until the yarn can hit it again
+  yarnTick: number; // tick when the yarn can hit it again
+  meowTick: number; // and the meow aura
   timer: number; // dogs: ticks of the dash left (> 0) or until the next (< 0)
   leader: number; // a hose segment follows this enemy; 0 for the head
 }
@@ -181,7 +181,9 @@ export interface Gem {
 export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin' | 'chest';
 export const PICKUP_WEIGHTS: Record<PickupKind, number> = { food: 5, coin: 3, catnip: 1, plug: 1, alarm: 1, chest: 0 };
 const PICKUP_CHANCE = 0.007; // per kill
-const FREEZE_TICKS = 6 * TICK_RATE;
+const FREEZE_TICKS = 10 * TICK_RATE;
+// Ticks between the projectiles of one attack, from VS.
+const VOLLEY_GAP: Record<WeaponId, number> = { claws: 3, laser: 3, fish: 3, yarn: 0, meow: 0, glass: 9, pot: 6, spark: 1 };
 
 export interface Pickup {
   id: number;
@@ -283,6 +285,8 @@ export class CatRun {
   events: SimEvent[] = [];
   private readonly trackEvents: boolean;
   private nextId = 1;
+  // Projectiles of attacks still to leave.
+  private volleys: { id: WeaponId; i: number; n: number; at: number; a: number }[] = [];
   private burstAcc = 0;
   private cd: Partial<Record<WeaponId, number>> = {};
   private sepKeys = new Float64Array(MAX_ENEMIES + 64);
@@ -469,6 +473,7 @@ export class CatRun {
       dead: false,
       hitTick: -100,
       yarnTick: 0,
+      meowTick: 0,
       timer: 0,
       leader: 0,
     };
@@ -680,122 +685,141 @@ export class CatRun {
     });
   }
 
-  // Fires every weapon whose cooldown is over.
+  // Fires every weapon whose cooldown is over. As in VS, the projectiles of
+  // one attack leave one after another, a short gap apart.
   private attack(): void {
-    const p = this.player;
     for (const id of this.weapons()) {
       const w = this.weaponStats(id);
       if (id === 'yarn') {
         this.spinYarn(w);
         continue;
       }
+      if (id === 'meow') {
+        this.meowAura(w);
+        continue;
+      }
       const left = (this.cd[id] ?? 0) - 1;
       this.cd[id] = left;
       if (left > 0) continue;
       this.cd[id] = Math.max(2, Math.round(w.cd * TICK_RATE));
-      switch (id) {
-        case 'claws': {
-          // Like the VS whip: a long horizontal slash that starts a little
-          // behind the cat; the second one goes the other way, a bit higher.
-          const width = 150 * w.area;
-          const back = 30 * w.area;
-          const h = 40 * w.area;
-          for (let i = 0; i < Math.min(w.amount, 2); i++) {
-            const face = (i === 0 ? p.face : -p.face) as 1 | -1;
-            const cx = p.x + face * (width / 2 - back);
-            const cy = p.y - i * h * 0.5;
-            this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
-            for (const en of this.enemies) {
-              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, this.evolved.claws ? 0.5 : 0);
-            }
-          }
-          break;
+      if (id === 'pot' && this.evolved.pot) {
+        // Death spiral: every pot at once, out in a ring.
+        const turn = (this.tick % 90) / 90;
+        for (let i = 0; i < w.amount; i++) {
+          const a = (turn + i / w.amount) * Math.PI * 2;
+          this.shoot('pot', dcos(a), dsin(a), 330 * w.speed, { ...w, pierce: 999 }, 1.4, 14);
         }
-        case 'laser': {
-          const used = new Set<number>();
-          for (let i = 0; i < w.amount; i++) {
-            const t = this.nearest(p.x, p.y, 500, used) ?? this.nearest(p.x, p.y, 500);
-            if (!t) break;
-            used.add(t.id);
-            const d = len(t.x - p.x, t.y - p.y) || 1;
-            this.shoot('laser', (t.x - p.x) / d, (t.y - p.y) / d, 420 * w.speed, w, 1.6, 7);
-          }
-          break;
+        continue;
+      }
+      // Santa water starts its circle where the first flask can't aim.
+      const a = this.rng.next() * Math.PI * 2;
+      for (let i = 0; i < w.amount; i++) this.volleys.push({ id, i, n: w.amount, at: this.tick + i * VOLLEY_GAP[id], a });
+    }
+    if (!this.volleys.length) return;
+    for (const v of this.volleys) if (v.at <= this.tick) this.fire(v.id, this.weaponStats(v.id), v.i, v.n, v.a);
+    compact(this.volleys, (v) => v.at > this.tick);
+  }
+
+  // One projectile of an attack: the i-th of n.
+  private fire(id: WeaponId, w: WeaponStats, i: number, n: number, a: number): void {
+    const p = this.player;
+    switch (id) {
+      case 'claws': {
+        // The VS whip: a long slash that starts a little behind the cat;
+        // the next goes the other way, each one a bit higher.
+        const width = 150 * w.area;
+        const back = 30 * w.area;
+        const h = 40 * w.area;
+        const face = (i % 2 === 0 ? p.face : -p.face) as 1 | -1;
+        const cx = p.x + face * (width / 2 - back);
+        const cy = p.y - i * h * 0.5;
+        this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
+        for (const en of this.enemies) {
+          if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, this.evolved.claws ? 0.5 : 0);
         }
-        case 'fish': {
-          for (let i = 0; i < w.amount; i++) {
-            const off = (i - (w.amount - 1) / 2) * 0.12;
-            const c = dcos(off);
-            const s = dsin(off);
-            this.shoot('fish', p.dx * c - p.dy * s, p.dx * s + p.dy * c, 620 * w.speed, w, 0.9, 8);
-          }
-          break;
-        }
-        case 'pot': {
-          if (this.evolved.pot) {
-            // Cactus fall: pots fly out in a spiral and pierce everything.
-            const turn = (this.tick % 90) / 90;
-            for (let i = 0; i < w.amount; i++) {
-              const a = (turn + i / w.amount) * Math.PI * 2;
-              this.shoot('pot', dcos(a), dsin(a), 330 * w.speed, { ...w, pierce: 999 }, 1.4, 14);
-            }
-            break;
-          }
-          for (let i = 0; i < w.amount; i++) {
-            const vx = (this.rng.next() - 0.5) * 2 * 160 + p.face * 40;
-            this.shots.push({
-              id: this.nextId++,
-              kind: 'pot',
-              x: p.x,
-              y: p.y,
-              vx: vx * w.speed,
-              vy: -560 * w.speed,
-              gravity: 1000 * w.speed * w.speed,
-              life: Math.round(1.5 * TICK_RATE),
-              dmg: w.dmg,
-              r: 14 * w.area,
-              pierce: w.pierce,
-              hits: [],
-            });
-          }
-          break;
-        }
-        case 'meow': {
-          const R = 62 * w.area;
-          this.emit({ t: 'wave', x: p.x, y: p.y, r: R });
-          for (const en of this.enemies) {
-            const dx = en.x - p.x;
-            const dy = en.y - p.y;
-            const d = len(dx, dy) || 1;
-            if (d < R + en.r) this.hit(en, w.dmg, (dx / d) * BALANCE.meowPush, (dy / d) * BALANCE.meowPush, this.evolved.meow ? 0.3 : 0);
-          }
-          break;
-        }
-        case 'glass': {
-          for (let i = 0; i < w.amount; i++) {
-            const a = this.rng.next() * Math.PI * 2;
-            const d = 60 + this.rng.next() * 140;
-            this.zones.push({
-              id: this.nextId++,
-              x: p.x + dcos(a) * d,
-              y: p.y + dsin(a) * d,
-              r: 42 * w.area,
-              life: Math.round(w.duration * TICK_RATE),
-              dmg: w.dmg,
-            });
-          }
-          break;
-        }
-        case 'spark': {
-          const near = this.enemies.filter((en) => !en.dead && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y);
-          const R = 26 * w.area;
-          for (const t of this.rng.sample(near, w.amount)) {
-            this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
-            const times = this.evolved.spark ? 2 : 1;
-            for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0);
-          }
-          break;
-        }
+        break;
+      }
+      case 'laser': {
+        // Every shot at the nearest enemy on screen.
+        const t = this.nearestOnScreen();
+        if (!t) break;
+        const d = len(t.x - p.x, t.y - p.y) || 1;
+        this.shoot('laser', (t.x - p.x) / d, (t.y - p.y) / d, 420 * w.speed, w, 1.6, 7);
+        break;
+      }
+      case 'fish': {
+        // Thrown where the cat looks, a little scattered.
+        const off = (this.rng.next() - 0.5) * 0.2;
+        const c = dcos(off);
+        const s = dsin(off);
+        this.shoot('fish', p.dx * c - p.dy * s, p.dx * s + p.dy * c, 620 * w.speed, w, 0.9, 8);
+        break;
+      }
+      case 'pot': {
+        // The first pot goes straight up, the next ones forward in wider arcs.
+        const vx = i === 0 ? 0 : p.face * (60 + 70 * i);
+        this.shots.push({
+          id: this.nextId++,
+          kind: 'pot',
+          x: p.x,
+          y: p.y,
+          vx: vx * w.speed,
+          vy: -560 * w.speed,
+          gravity: 1000 * w.speed * w.speed,
+          life: Math.round(1.5 * TICK_RATE),
+          dmg: w.dmg,
+          r: 14 * w.area,
+          pierce: w.pierce,
+          hits: [],
+        });
+        break;
+      }
+      case 'glass': {
+        // The first glass at the nearest enemy, the rest round the cat clockwise.
+        const t = i === 0 && n < 4 ? this.nearestOnScreen() : null;
+        const ang = a + (i * Math.PI * 2) / n;
+        const d = 120;
+        this.zones.push({
+          id: this.nextId++,
+          x: t ? t.x : p.x + dcos(ang) * d,
+          y: t ? t.y : p.y + dsin(ang) * d,
+          r: 42 * w.area,
+          life: Math.round(w.duration * TICK_RATE),
+          dmg: w.dmg,
+        });
+        break;
+      }
+      case 'spark': {
+        const near = this.enemies.filter((en) => !en.dead && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y);
+        if (!near.length) break;
+        const t = near[this.rng.int(near.length)];
+        const R = 26 * w.area;
+        this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
+        const times = this.evolved.spark ? 2 : 1;
+        for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0);
+        break;
+      }
+    }
+  }
+
+  private nearestOnScreen(): Enemy | null {
+    const p = this.player;
+    const t = this.nearest(p.x, p.y, SCREEN_Y);
+    return t && Math.abs(t.x - p.x) < SCREEN_X ? t : null;
+  }
+
+  // Garlic: always on. An enemy is hurt as it comes in, then again once the
+  // cooldown has passed for it. It pushes nobody.
+  private meowAura(w: WeaponStats): void {
+    const p = this.player;
+    const R = 62 * w.area;
+    const every = Math.max(2, Math.round(w.cd * TICK_RATE));
+    if (this.tick % every === 0) this.emit({ t: 'wave', x: p.x, y: p.y, r: R });
+    for (const en of this.enemies) {
+      if (en.dead || en.meowTick > this.tick) continue;
+      if ((en.x - p.x) ** 2 + (en.y - p.y) ** 2 < (R + en.r) ** 2) {
+        en.meowTick = this.tick + every;
+        this.hit(en, w.dmg, 0, 0, this.evolved.meow ? 0.3 : 0);
       }
     }
   }
@@ -823,7 +847,7 @@ export class CatRun {
       for (const en of this.enemies) {
         if (en.dead || en.yarnTick > this.tick) continue;
         if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + r) ** 2) {
-          en.yarnTick = this.tick + Math.round(0.5 * TICK_RATE);
+          en.yarnTick = this.tick + Math.round(1.7 * TICK_RATE); // the VS hitbox delay
           this.hit(en, w.dmg, c * 60, s * 60);
         }
       }
@@ -892,13 +916,23 @@ export class CatRun {
           speed = ld < en.r * 1.6 ? 0 : Math.min(speed * 1.6, (ld - en.r * 1.6) * TICK_RATE);
         }
       }
+      const ox = en.x;
+      const oy = en.y;
       en.x += (ux * speed + en.kx) * DT;
       en.y += (uy * speed + en.ky) * DT;
       // Washers leave slippery water behind.
       if (en.kind === 'washer' && (this.tick + en.id) % (TICK_RATE * 1.2) === 0) {
         this.hazards.push({ id: this.nextId++, kind: 'puddle', x: en.x, y: en.y, vx: 0, vy: 0, r: 30 + en.r, life: 6 * TICK_RATE });
       }
-      [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
+      // Pigeons fly over furniture and fences.
+      if (move !== 'flock') [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
+      // Pressed flat against furniture: walk along it to get round instead of
+      // standing there.
+      const step = speed * DT;
+      if (step > 0 && move !== 'flock' && (en.x - ox) ** 2 + (en.y - oy) ** 2 < (step * 0.3) ** 2) {
+        const way = this.map.detour(en.x, en.y, en.r, p.x, p.y);
+        if (way) [en.x, en.y] = this.map.pushOut(en.x + way[0] * step, en.y + way[1] * step, en.r);
+      }
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
       if (d < (en.r + p.r) * CONTACT && p.inv <= 0 && !en.dead) {
@@ -913,7 +947,7 @@ export class CatRun {
     const p = this.player;
     const dmg = Math.max(1, raw - this.stats.armor);
     p.hp -= dmg;
-    p.inv = Math.round(0.4 * TICK_RATE);
+    p.inv = Math.round(0.24 * TICK_RATE); // as in VS
     this.emit({ t: 'hurt', dmg, kind });
     if (p.hp > 0) return false;
     if (this.revives > 0) {
@@ -1107,7 +1141,8 @@ export class CatRun {
       }
       if (d < p.r + 6 && !g.got) {
         g.got = true;
-        this.xp += g.v * this.stats.growth;
+        // At levels 20 and 40 the next level costs much more, and gems count double, as in VS.
+        this.xp += g.v * this.stats.growth * (this.level === 20 || this.level === 40 ? 2 : 1);
       }
     }
     this.checkLevel();
@@ -1204,8 +1239,19 @@ export class CatRun {
       if (this.fullTick < 0) this.fullTick = this.tick;
       return ['snack', 'fishes'];
     }
-    const four = this.rng.next() < 1 - 1 / this.stats.luck;
-    return this.rng.sample(pool, four ? 4 : 3);
+    const count = this.rng.next() < 1 - 1 / this.stats.luck ? 4 : 3;
+    const cards: ItemId[] = [];
+    // As in VS: while slots are free, the cat is first offered what it has,
+    // twice with a chance that is higher on even levels.
+    if (this.weapons().length < SLOTS || this.passives().length < SLOTS) {
+      const chance = 1 + 0.3 * (this.level % 2 === 0 ? 2 : 1) - 1 / this.stats.luck;
+      for (let k = 0; k < 2; k++) {
+        const owned = pool.filter((id) => this.lvl(id) > 0 && !cards.includes(id));
+        if (owned.length && this.rng.next() < chance) cards.push(this.rng.pick(owned));
+      }
+    }
+    const rest = pool.filter((id) => !cards.includes(id));
+    return [...cards, ...this.rng.sample(rest, count - cards.length)];
   }
 
   private take(k: CardId): void {

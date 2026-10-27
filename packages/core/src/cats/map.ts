@@ -194,6 +194,29 @@ export class RoomMap {
     return !b || (x > b.minX && x < b.maxX && y > b.minY && y < b.maxY);
   }
 
+  // Which way to walk along the furniture a circle is pressed against to get
+  // round it towards (tx, ty): the end of that face with the shorter way on.
+  // Null when nothing blocks the circle.
+  detour(x: number, y: number, r: number, tx: number, ty: number): [number, number] | null {
+    for (const f of this.near(x, y, r + 2, this.scratch)) {
+      const cx = Math.max(f.x, Math.min(x, f.x + f.w));
+      const cy = Math.max(f.y, Math.min(y, f.y + f.h));
+      if ((x - cx) ** 2 + (y - cy) ** 2 > (r + 2) ** 2) continue;
+      if (cy > f.y && cy < f.y + f.h) {
+        // Against a left or right side: go round the top or the bottom.
+        const up = y - (f.y - r) + Math.hypot(tx - x, ty - (f.y - r));
+        const down = f.y + f.h + r - y + Math.hypot(tx - x, ty - (f.y + f.h + r));
+        return [0, up < down ? -1 : 1];
+      }
+      if (cx > f.x && cx < f.x + f.w) {
+        const left = x - (f.x - r) + Math.hypot(tx - (f.x - r), ty - y);
+        const right = f.x + f.w + r - x + Math.hypot(tx - (f.x + f.w + r), ty - y);
+        return [left < right ? -1 : 1, 0];
+      }
+    }
+    return null;
+  }
+
   blocked(x: number, y: number, r: number): boolean {
     const [nx, ny] = this.pushOut(x, y, r);
     return nx !== x || ny !== y;

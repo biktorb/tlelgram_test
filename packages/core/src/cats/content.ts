@@ -241,12 +241,12 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     'Клубок',
     'Клубки кружат вокруг кота',
     { dmg: 10, cd: 3, amount: 1, area: 1, speed: 1, duration: 3, pierce: 0 },
-    [{ amount: 1 }, { speed: 0.25, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }, { speed: 0.25, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }],
+    [{ amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }],
   ),
-  // Garlic: an aura that hurts and pushes enemies around the cat.
+  // Garlic: an aura that hurts enemies around the cat.
   meow: weapon(
     'Мяу',
-    'Громкое мяу ранит и отталкивает всех рядом',
+    'Мурчащая аура ранит всех, кто подошёл к коту',
     { dmg: 5, cd: 1.3, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ area: 0.4, dmg: 2 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 2 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }],
   ),
@@ -337,8 +337,8 @@ export function cardText(id: CardId, level: number): string {
 // Experience to go from `level` to the next, as in Vampire Survivors.
 export function xpToNext(level: number): number {
   if (level < 20) return 5 + (level - 1) * 10;
-  if (level < 40) return 195 + (level - 20) * 13;
-  return 455 + (level - 40) * 16;
+  if (level < 40) return 195 + (level - 20) * 13 + (level === 20 ? 600 : 0);
+  return 455 + (level - 40) * 16 + (level === 40 ? 2400 : 0);
 }
 
 // The cats, like the heroes of VS: own starting weapon and stats, and a
