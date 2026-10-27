@@ -18,7 +18,7 @@ if (config.databaseUrl) {
 }
 
 const replay = workerReplayer();
-const app = await buildApp(config, store, { logger: true, replay });
+const app = await buildApp(config, store, { logger: true, replay, analyze: replay.analyze });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {

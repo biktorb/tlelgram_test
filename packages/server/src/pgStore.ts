@@ -8,6 +8,7 @@ import {
   type ChatEntry,
   DailyTakenError,
   type Duel,
+  type RecentRun,
   type DuelInboxItem,
   type DuelResult,
   type DuelWithRun,
@@ -88,6 +89,15 @@ export class PgStore implements Store {
       if ((e as { constraint?: string }).constraint === 'cat_runs_daily_once') throw new DailyTakenError();
       throw e;
     }
+  }
+
+  async recentRuns(limit: number): Promise<RecentRun[]> {
+    const { rows } = await this.pool.query(
+      `SELECT ${RUN_COLUMNS}, u.first_name AS name FROM cat_runs JOIN users u ON u.id = cat_runs.user_id
+       WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT $1`,
+      [limit],
+    );
+    return rows.map((r) => ({ ...toRun(r), name: r.name, finishedAt: r.finished_at.getTime() }));
   }
 
   async getRun(runId: string): Promise<StoredRun | null> {
