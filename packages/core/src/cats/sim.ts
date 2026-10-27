@@ -1,29 +1,66 @@
 import { Rng } from '../rng.ts';
-import { ENEMIES, UPGRADES, UPGRADE_IDS, type EnemyKind, type UpgradeId } from './content.ts';
+import {
+  BASE_STATS,
+  ENEMIES,
+  HEROES,
+  PASSIVES,
+  PASSIVE_IDS,
+  SLOTS,
+  WEAPONS,
+  WEAPON_IDS,
+  isPassive,
+  isWeapon,
+  itemMax,
+  xpToNext,
+  type CardId,
+  type EnemyKind,
+  type HeroId,
+  type ItemId,
+  type PassiveId,
+  type Stats,
+  type WeaponId,
+  type WeaponStats,
+} from './content.ts';
 import { dcos, dsin, len } from './math.ts';
 
 // Fixed step: the same input on the same seed gives the same run everywhere.
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
-export const RUN_SECONDS = 300;
+export const RUN_SECONDS = 20 * 60;
 export const RUN_TICKS = RUN_SECONDS * TICK_RATE;
-export const BOSS_TICK = 270 * TICK_RATE;
-export const ELITE_EVERY = 60 * TICK_RATE;
-export const MAX_ENEMIES = 260; // more than this crawls on older phones
-export const SPAWN_DISTANCE = 500; // just outside a phone screen
-const DESPAWN_DISTANCE = 1500;
+const MINUTE = 60 * TICK_RATE;
+export const BOSS_TICK = 18 * MINUTE;
+export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
+export const MAX_ENEMIES = 300; // more than this crawls on older phones
+export const SPAWN_DISTANCE = 520; // just outside a phone screen
+export const MAX_GEMS = 250; // further gems merge into one
+const DESPAWN_DISTANCE = 1400;
 const KNOCKBACK_DECAY = 0.8777435898906345; // 0.02 per second, per tick
 const CELL = 40;
+const SEPARATE_PAIRS = 6;
+// Half the visible area around the cat, for weapons that strike "on screen".
+const SCREEN_X = 360;
+const SCREEN_Y = 460;
 
 // Difficulty knobs, tuned with `npm run balance:cats`.
 export const BALANCE = {
-  spawnBase: 2, // enemies per second at the start
-  spawnGrowth: 0.08, // extra enemies per second for every second played
-  hpGrowth: 0.012, // enemy health grows by this share every second
-  hpGrowth2: 0.0002, // and by this share every second squared, to keep up with upgrades
-  meowPush: 200, // knockback of the meow wave
-  catSpeed: 150,
+  hpPerMin: 0.15, // enemy health grows by this share every minute
+  hpPerMin2: 0.03, // and by this share every minute squared, to keep up with upgrades
+  crowdStart: 10, // fewest enemies around the cat at the start
+  crowdEnd: 240, // and at 20:00
+  burstEvery: 1.2, // seconds between extra spawns
+  meowPush: 90, // knockback of the meow aura
+  xpPerMin: 0.1, // gems grow by this share every minute, as levels get dearer
 };
+
+// The room's enemy mix by minute: weights of each kind.
+const WAVES: { from: number; mix: Partial<Record<EnemyKind, number>> }[] = [
+  { from: 0, mix: { mouse: 1 } },
+  { from: 3, mix: { mouse: 0.7, dust: 0.3 } },
+  { from: 6, mix: { mouse: 0.5, dust: 0.42, robot: 0.08 } },
+  { from: 10, mix: { mouse: 0.4, dust: 0.45, robot: 0.15 } },
+  { from: 15, mix: { mouse: 0.35, dust: 0.4, robot: 0.25 } },
+];
 
 // Joystick direction: 0 is "stand still", 1..16 point around the circle
 // starting from the right and going clockwise on screen (y grows down).
@@ -42,8 +79,10 @@ export interface Player {
   r: number;
   hp: number;
   maxHp: number;
-  speed: number;
   face: 1 | -1;
+  // Last direction moved, for weapons thrown "forward".
+  dx: number;
+  dy: number;
   inv: number; // ticks of invulnerability left
 }
 
@@ -60,22 +99,40 @@ export interface Enemy {
   xp: number;
   kx: number;
   ky: number;
+  // Charging enemies keep this heading.
+  vx: number;
+  vy: number;
   elite: boolean;
   dead: boolean;
   hitTick: number;
-  yarnTick: number;
+  yarnTick: number; // ticks until the yarn can hit it again
 }
+
+export type ShotKind = 'laser' | 'fish' | 'pot';
 
 export interface Shot {
   id: number;
+  kind: ShotKind;
   x: number;
   y: number;
   vx: number;
   vy: number;
+  gravity: number;
   life: number; // ticks
   dmg: number;
   r: number;
   pierce: number;
+  hits: number[]; // enemies already hit, so piercing shots hit each once
+}
+
+// A puddle from the glass: hurts whatever stands in it.
+export interface Zone {
+  id: number;
+  x: number;
+  y: number;
+  r: number;
+  life: number; // ticks
+  dmg: number;
 }
 
 export interface Gem {
@@ -87,6 +144,22 @@ export interface Gem {
   got: boolean;
 }
 
+// Things on the floor, as in Vampire Survivors: food heals, catnip pulls
+// every gem, the alarm clock clears the screen, the unplugged plug stops
+// every vacuum for a while, and fish is fish.
+export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin';
+export const PICKUP_WEIGHTS: Record<PickupKind, number> = { food: 5, coin: 3, catnip: 1, plug: 1, alarm: 1 };
+const PICKUP_CHANCE = 0.007; // per kill
+const FREEZE_TICKS = 6 * TICK_RATE;
+
+export interface Pickup {
+  id: number;
+  kind: PickupKind;
+  x: number;
+  y: number;
+  got: boolean;
+}
+
 // What happened during a tick, for effects and sounds. The server skips them.
 export type SimEvent =
   | { t: 'hit'; x: number; y: number; dmg: number }
@@ -94,8 +167,11 @@ export type SimEvent =
   | { t: 'hurt'; dmg: number }
   | { t: 'level' }
   | { t: 'boss' }
+  | { t: 'elite' }
+  | { t: 'slash'; x: number; y: number; w: number; h: number; face: 1 | -1 }
   | { t: 'wave'; x: number; y: number; r: number }
-  | { t: 'beam'; x: number; y: number; dx: number; dy: number; len: number; w: number }
+  | { t: 'spark'; x: number; y: number; r: number }
+  | { t: 'pickup'; kind: PickupKind }
   | { t: 'end'; won: boolean };
 
 export interface RunResult {
@@ -103,7 +179,8 @@ export interface RunResult {
   ticks: number;
   kills: number;
   level: number;
-  upgrades: Partial<Record<UpgradeId, number>>;
+  fish: number;
+  items: Partial<Record<ItemId, number>>;
 }
 
 // League and season points of a finished run: one per full 30 seconds
@@ -115,77 +192,144 @@ export type Score = Pick<RunResult, 'won' | 'ticks' | 'kills'>;
 // Negative when a ranks above b: a win first, then the longer run, then more kills.
 export const compareScores = (a: Score, b: Score): number => Number(b.won) - Number(a.won) || b.ticks - a.ticks || b.kills - a.kills;
 
+export interface RunOptions {
+  events?: boolean;
+  hero?: HeroId;
+}
+
+// Removes the items that fail `keep`, in place and in order.
+function compact<T>(xs: T[], keep: (x: T) => boolean): void {
+  let n = 0;
+  for (let i = 0; i < xs.length; i++) if (keep(xs[i])) xs[n++] = xs[i];
+  xs.length = n;
+}
+
 export class CatRun {
   readonly seed: number;
   readonly rng: Rng;
+  readonly hero: HeroId;
   tick = 0;
   over = false;
   won = false;
   kills = 0;
   level = 1;
   xp = 0;
-  need = 4;
-  magnet = 70;
-  power = 1;
-  up: Partial<Record<UpgradeId, number>> = { fish: 1 };
-  player: Player = { x: 0, y: 0, r: 14, hp: 100, maxHp: 100, speed: BALANCE.catSpeed, face: 1, inv: 0 };
+  need = xpToNext(1);
+  fish = 0;
+  rerolls = 1;
+  // Tick when every slot was full and maxed, or -1.
+  fullTick = -1;
+  // Owned weapons and passives in the order they were taken, with levels.
+  items: Partial<Record<ItemId, number>> = {};
+  stats: Stats = { ...BASE_STATS };
+  player: Player = { x: 0, y: 0, r: 14, hp: 100, maxHp: 100, face: 1, dx: 1, dy: 0, inv: 0 };
   enemies: Enemy[] = [];
   shots: Shot[] = [];
+  zones: Zone[] = [];
   gems: Gem[] = [];
+  pickups: Pickup[] = [];
+  freeze = 0; // ticks the vacuums stay unplugged
+  // Yarn: the angle of the first ball, and ticks left while it spins.
   yarnAngle = 0;
-  // Upgrades offered on level-up; the run waits until one is chosen.
-  pending: UpgradeId[] | null = null;
+  yarnLeft = 0;
+  // Cards offered on level-up; the run waits until one is chosen.
+  pending: CardId[] | null = null;
   events: SimEvent[] = [];
   private readonly trackEvents: boolean;
   private nextId = 1;
-  private spawnAcc = 0;
-  private bossSpawned = false;
-  private cd = { fish: 0, meow: TICK_RATE, laser: 1.5 * TICK_RATE };
+  private burstAcc = 0;
+  private cd: Partial<Record<WeaponId, number>> = {};
+  private sepKeys = new Float64Array(MAX_ENEMIES + 64);
+  private sepHead = new Int32Array(1024);
+  private sepNext = new Int32Array(MAX_ENEMIES + 64);
 
-  constructor(seed: number, opts: { events?: boolean } = {}) {
+  constructor(seed: number, opts: RunOptions = {}) {
     this.seed = seed >>> 0;
     this.rng = new Rng(this.seed);
     this.trackEvents = opts.events ?? true;
+    this.hero = opts.hero ?? 'ryzhik';
+    this.items[HEROES[this.hero].weapon] = 1;
+    this.recompute();
+    this.player.hp = this.player.maxHp;
   }
 
   get time(): number {
     return this.tick / TICK_RATE;
   }
 
-  lvl(k: UpgradeId): number {
-    return this.up[k] ?? 0;
+  lvl(k: ItemId): number {
+    return this.items[k] ?? 0;
+  }
+
+  weapons(): WeaponId[] {
+    return (Object.keys(this.items) as ItemId[]).filter(isWeapon);
+  }
+
+  passives(): PassiveId[] {
+    return (Object.keys(this.items) as ItemId[]).filter(isPassive);
   }
 
   result(): RunResult {
-    return { won: this.won, ticks: this.tick, kills: this.kills, level: this.level, upgrades: { ...this.up } };
+    return { won: this.won, ticks: this.tick, kills: this.kills, level: this.level, fish: this.fish, items: { ...this.items } };
   }
 
-  // Advances one tick. Does nothing while an upgrade choice is pending.
+  // A weapon's numbers at its level, scaled by the cat's stats.
+  weaponStats(id: WeaponId): WeaponStats {
+    const def = WEAPONS[id];
+    const w = { ...def.base };
+    for (let i = 0; i < this.lvl(id) - 1; i++) {
+      const d = def.levels[i];
+      w.dmg += d.dmg ?? 0;
+      w.cd += d.cd ?? 0;
+      w.amount += d.amount ?? 0;
+      w.area += d.area ?? 0;
+      w.speed += d.speed ?? 0;
+      w.duration += d.duration ?? 0;
+      w.pierce += d.pierce ?? 0;
+    }
+    const s = this.stats;
+    w.dmg *= s.might;
+    w.cd *= s.cooldown;
+    w.amount += s.amount;
+    w.area *= s.area;
+    w.speed *= s.speed;
+    w.duration *= s.duration;
+    return w;
+  }
+
+  // Advances one tick. Does nothing while a card choice is pending.
   step(dir: number): void {
     if (this.over || this.pending) return;
     this.events.length = 0;
     this.tick++;
     const p = this.player;
     const [mx, my] = DIR_VECTORS[dir] ?? DIR_VECTORS[0];
-    p.x += mx * p.speed * DT;
-    p.y += my * p.speed * DT;
+    p.x += mx * this.stats.move * DT;
+    p.y += my * this.stats.move * DT;
+    if (mx || my) {
+      p.dx = mx;
+      p.dy = my;
+    }
     if (mx > 0.01) p.face = 1;
     else if (mx < -0.01) p.face = -1;
     if (p.inv > 0) p.inv--;
-    const heart = this.lvl('heart');
-    if (heart) p.hp = Math.min(p.maxHp, p.hp + DT * 0.4 * heart);
+    if (this.stats.recovery) p.hp = Math.min(p.maxHp, p.hp + this.stats.recovery * DT);
 
     this.spawner();
-    this.weapons();
+    this.attack();
     this.moveEnemies();
     if (this.over) return;
     this.separate();
     this.moveShots();
+    this.tickZones();
     this.collectGems();
+    this.collectPickups();
 
-    this.enemies = this.enemies.filter((e) => !e.dead && len(e.x - p.x, e.y - p.y) < DESPAWN_DISTANCE);
-    this.shots = this.shots.filter((s) => s.life > 0);
-    this.gems = this.gems.filter((g) => !g.got);
+    compact(this.enemies, (e) => !e.dead);
+    compact(this.shots, (s) => s.life > 0);
+    compact(this.zones, (z) => z.life > 0);
+    compact(this.gems, (g) => !g.got);
+    compact(this.pickups, (g) => !g.got);
     if (!this.over && this.tick >= RUN_TICKS) this.finish(true);
   }
 
@@ -193,8 +337,15 @@ export class CatRun {
     if (!this.pending) return;
     const k = this.pending[index] ?? this.pending[0];
     this.pending = null;
-    this.apply(k);
+    this.take(k);
     this.checkLevel();
+  }
+
+  // Swaps the offered cards for new ones, if a reroll is left.
+  reroll(): void {
+    if (!this.pending || this.rerolls <= 0) return;
+    this.rerolls--;
+    this.pending = this.offer();
   }
 
   private emit(e: SimEvent): void {
@@ -210,52 +361,101 @@ export class CatRun {
   }
 
   // ---------- spawning ----------
-  private spawn(kind: EnemyKind, elite = false): void {
+  private spawn(kind: EnemyKind, elite = false): Enemy {
     const def = ENEMIES[kind];
     const a = this.rng.next() * Math.PI * 2;
-    const scale = kind === 'boss' ? 1 : 1 + this.time * BALANCE.hpGrowth + this.time * this.time * BALANCE.hpGrowth2; // enemies get tougher over time
-    const hp = def.hp * scale * (elite ? 6 : 1);
-    this.enemies.push({
+    const m = this.time / 60;
+    const scale = kind === 'mop' ? 1 : 1 + m * BALANCE.hpPerMin + m * m * BALANCE.hpPerMin2;
+    const hp = def.hp * scale;
+    const x = this.player.x + dcos(a) * SPAWN_DISTANCE;
+    const y = this.player.y + dsin(a) * SPAWN_DISTANCE;
+    const en: Enemy = {
       id: this.nextId++,
       kind,
-      x: this.player.x + dcos(a) * SPAWN_DISTANCE,
-      y: this.player.y + dsin(a) * SPAWN_DISTANCE,
-      r: def.r * (elite ? 1.5 : 1),
+      x,
+      y,
+      r: def.r,
       hp,
       maxHp: hp,
       speed: def.speed,
       dmg: def.dmg,
-      xp: def.xp * (elite ? 8 : 1),
+      xp: elite ? 60 * (1 + m) : def.xp * (1 + m * BALANCE.xpPerMin),
       kx: 0,
       ky: 0,
+      vx: 0,
+      vy: 0,
       elite,
       dead: false,
       hitTick: -100,
       yarnTick: 0,
-    });
+    };
+    if (def.move === 'charge') this.aim(en);
+    this.enemies.push(en);
+    return en;
+  }
+
+  // A charging enemy picks the line through the cat and keeps it.
+  private aim(en: Enemy): void {
+    const dx = this.player.x - en.x;
+    const dy = this.player.y - en.y;
+    const d = len(dx, dy) || 1;
+    en.vx = dx / d;
+    en.vy = dy / d;
+  }
+
+  private pickKind(): EnemyKind {
+    const minute = this.time / 60;
+    let mix = WAVES[0].mix;
+    for (const w of WAVES) if (minute >= w.from) mix = w.mix;
+    let r = this.rng.next();
+    const kinds = Object.keys(mix) as EnemyKind[];
+    for (const k of kinds) {
+      r -= mix[k]!;
+      if (r < 0) return k;
+    }
+    return kinds[kinds.length - 1];
   }
 
   private spawner(): void {
-    const t = this.time;
-    this.spawnAcc += (BALANCE.spawnBase + t * BALANCE.spawnGrowth) * DT; // enemies per second
-    while (this.spawnAcc >= 1 && this.enemies.length < MAX_ENEMIES) {
-      this.spawnAcc--;
-      const r = this.rng.next();
-      this.spawn(t > 150 && r < 0.12 ? 'vacuum' : t > 45 && r < 0.35 ? 'dog' : 'mouse');
+    const f = this.tick / RUN_TICKS;
+    // Keep a crowd around the cat, growing over the run.
+    const crowd = Math.round(BALANCE.crowdStart + (BALANCE.crowdEnd - BALANCE.crowdStart) * f);
+    let n = 0;
+    while (this.enemies.length < Math.min(crowd, MAX_ENEMIES) && n++ < 6) this.spawn(this.pickKind());
+    // And small bursts on top of it.
+    this.burstAcc += DT;
+    if (this.burstAcc >= BALANCE.burstEvery) {
+      this.burstAcc -= BALANCE.burstEvery;
+      const size = 1 + Math.floor((this.time / 60) * 0.4);
+      const cap = Math.min(MAX_ENEMIES, crowd * 1.5);
+      for (let i = 0; i < size && this.enemies.length < cap; i++) this.spawn(this.pickKind());
     }
-    if (this.spawnAcc > 1) this.spawnAcc = 1;
-    // An elite every minute, the boss at 4:30.
-    if (this.tick % ELITE_EVERY === 0) this.spawn(t > 120 ? 'vacuum' : 'dog', true);
-    if (this.tick >= BOSS_TICK && !this.bossSpawned) {
-      this.bossSpawned = true;
-      this.spawn('boss');
+    if (ELITE_TICKS.includes(this.tick)) {
+      const e = this.spawn('bigrobot', true);
+      e.hp = e.maxHp = ENEMIES.bigrobot.hp * (1 + this.time / 60);
+      this.emit({ t: 'elite' });
+    }
+    if (this.tick === BOSS_TICK) {
+      this.spawn('mop', true);
       this.emit({ t: 'boss' });
+    }
+    // The mop sweeps in dust around itself.
+    if (this.tick > BOSS_TICK && this.tick % (3 * TICK_RATE) === 0) {
+      const mop = this.enemies.find((e) => e.kind === 'mop');
+      if (mop) {
+        for (let i = 0; i < 6 && this.enemies.length < MAX_ENEMIES; i++) {
+          const d = this.spawn('dust');
+          const a = (i * Math.PI) / 3;
+          d.x = mop.x + dcos(a) * 60;
+          d.y = mop.y + dsin(a) * 60;
+        }
+      }
     }
   }
 
   // ---------- combat ----------
   private hit(en: Enemy, dmg: number, kx: number, ky: number): void {
-    dmg *= this.power;
+    if (en.dead) return;
     en.hp -= dmg;
     en.hitTick = this.tick;
     // Big enemies are heavy: knockback shrinks with size.
@@ -263,20 +463,57 @@ export class CatRun {
     en.kx += kx * mass;
     en.ky += ky * mass;
     this.emit({ t: 'hit', x: en.x, y: en.y - en.r, dmg });
-    if (en.hp <= 0 && !en.dead) {
+    if (en.hp <= 0) {
       en.dead = true;
       this.kills++;
       this.emit({ t: 'kill', x: en.x, y: en.y, kind: en.kind, elite: en.elite });
-      if (en.xp) this.gems.push({ id: this.nextId++, x: en.x, y: en.y, v: en.xp, pull: false, got: false });
-      if (en.kind === 'boss') this.finish(true);
+      if (en.xp) this.dropGem(en.x, en.y, en.xp);
+      if (en.elite && en.kind !== 'mop') this.dropPickup(en.x, en.y, 'food');
+      else if (this.rng.next() < PICKUP_CHANCE) this.dropPickup(en.x, en.y);
     }
   }
 
-  private nearest(x: number, y: number, maxD: number): Enemy | null {
+  private dropPickup(x: number, y: number, kind?: PickupKind): void {
+    if (!kind) {
+      const kinds = Object.keys(PICKUP_WEIGHTS) as PickupKind[];
+      let total = 0;
+      for (const k of kinds) total += PICKUP_WEIGHTS[k];
+      let r = this.rng.next() * total;
+      kind = kinds[kinds.length - 1];
+      for (const k of kinds) {
+        r -= PICKUP_WEIGHTS[k];
+        if (r < 0) {
+          kind = k;
+          break;
+        }
+      }
+    }
+    this.pickups.push({ id: this.nextId++, kind, x, y, got: false });
+  }
+
+  private dropGem(x: number, y: number, v: number): void {
+    if (this.gems.length >= MAX_GEMS) {
+      // Too many on the floor: the value goes to the farthest gem instead.
+      let far = this.gems[0];
+      let fd = -1;
+      for (const g of this.gems) {
+        const d = (g.x - this.player.x) ** 2 + (g.y - this.player.y) ** 2;
+        if (d > fd && !g.pull) {
+          fd = d;
+          far = g;
+        }
+      }
+      far.v += v;
+      return;
+    }
+    this.gems.push({ id: this.nextId++, x, y, v, pull: false, got: false });
+  }
+
+  private nearest(x: number, y: number, maxD: number, skip?: Set<number>): Enemy | null {
     let best: Enemy | null = null;
     let bd = maxD * maxD;
     for (const en of this.enemies) {
-      if (en.dead) continue;
+      if (en.dead || skip?.has(en.id)) continue;
       const d = (en.x - x) ** 2 + (en.y - y) ** 2;
       if (d < bd) {
         bd = d;
@@ -286,110 +523,195 @@ export class CatRun {
     return best;
   }
 
-  private weapons(): void {
+  private shoot(kind: ShotKind, ux: number, uy: number, speed: number, w: WeaponStats, life: number, r: number, gravity = 0): void {
     const p = this.player;
-    // Fish thrower: nearest enemy, more fish per volley with level.
-    const fl = this.lvl('fish');
-    if (fl && --this.cd.fish <= 0) {
-      const target = this.nearest(p.x, p.y, 420);
-      if (target) {
-        this.cd.fish = Math.round(Math.max(0.25, 0.6 - fl * 0.05) * TICK_RATE);
-        const n = Math.ceil(fl / 2);
-        const d = len(target.x - p.x, target.y - p.y) || 1;
-        const ux = (target.x - p.x) / d;
-        const uy = (target.y - p.y) / d;
-        for (let i = 0; i < n; i++) {
-          const off = (i - (n - 1) / 2) * 0.18;
-          const c = dcos(off);
-          const s = dsin(off);
-          const vx = ux * c - uy * s;
-          const vy = ux * s + uy * c;
-          this.shots.push({
-            id: this.nextId++,
-            x: p.x,
-            y: p.y,
-            vx: vx * 420,
-            vy: vy * 420,
-            life: 1.2 * TICK_RATE,
-            dmg: 12 * (1 + fl * 0.2),
-            r: 9,
-            pierce: fl >= 5 ? 2 : 0,
-          });
-        }
+    this.shots.push({
+      id: this.nextId++,
+      kind,
+      x: p.x,
+      y: p.y,
+      vx: ux * speed,
+      vy: uy * speed,
+      gravity,
+      life: Math.round(life * TICK_RATE),
+      dmg: w.dmg,
+      r: r * w.area,
+      pierce: w.pierce,
+      hits: [],
+    });
+  }
+
+  // Fires every weapon whose cooldown is over.
+  private attack(): void {
+    const p = this.player;
+    for (const id of this.weapons()) {
+      const w = this.weaponStats(id);
+      if (id === 'yarn') {
+        this.spinYarn(w);
+        continue;
       }
-    }
-    // Yarn balls orbit the cat.
-    const yl = this.lvl('yarn');
-    if (yl) {
-      this.yarnAngle += DT * (2.4 + yl * 0.4);
-      const n = 1 + yl;
-      const R = 62 + yl * 4;
-      for (let i = 0; i < n; i++) {
-        const a = this.yarnAngle + (i * Math.PI * 2) / n;
-        const c = dcos(a);
-        const s = dsin(a);
-        const x = p.x + c * R;
-        const y = p.y + s * R;
-        for (const en of this.enemies) {
-          if (en.dead || en.yarnTick > this.tick) continue;
-          if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + 12) ** 2) {
-            en.yarnTick = this.tick + Math.round(0.45 * TICK_RATE);
-            this.hit(en, 9 + yl * 3, c * 60, s * 60);
+      const left = (this.cd[id] ?? 0) - 1;
+      this.cd[id] = left;
+      if (left > 0) continue;
+      this.cd[id] = Math.max(2, Math.round(w.cd * TICK_RATE));
+      switch (id) {
+        case 'claws': {
+          const width = 130 * w.area;
+          const h = 34 * w.area;
+          for (let i = 0; i < Math.min(w.amount, 2); i++) {
+            const face = (i === 0 ? p.face : -p.face) as 1 | -1;
+            const cx = p.x + face * (width / 2 + 6);
+            this.emit({ t: 'slash', x: cx, y: p.y, w: width, h, face });
+            for (const en of this.enemies) {
+              if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - p.y) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0);
+            }
           }
+          break;
         }
-      }
-    }
-    // Meow wave: area damage with knockback.
-    const ml = this.lvl('meow');
-    if (ml && --this.cd.meow <= 0) {
-      this.cd.meow = Math.round((3 - ml * 0.3) * TICK_RATE);
-      const R = 90 + ml * 18;
-      this.emit({ t: 'wave', x: p.x, y: p.y, r: R });
-      for (const en of this.enemies) {
-        const dx = en.x - p.x;
-        const dy = en.y - p.y;
-        const d = len(dx, dy) || 1;
-        if (d < R + en.r) this.hit(en, 12 + ml * 6, (dx / d) * BALANCE.meowPush, (dy / d) * BALANCE.meowPush);
-      }
-    }
-    // Laser pointer: a beam through the nearest enemy.
-    const ll = this.lvl('laser');
-    if (ll && --this.cd.laser <= 0) {
-      const target = this.nearest(p.x, p.y, 500);
-      if (target) {
-        this.cd.laser = Math.round((2.2 - ll * 0.2) * TICK_RATE);
-        const d = len(target.x - p.x, target.y - p.y) || 1;
-        const cx = (target.x - p.x) / d;
-        const cy = (target.y - p.y) / d;
-        const beam = 520;
-        const w = 8 + ll * 3;
-        this.emit({ t: 'beam', x: p.x, y: p.y, dx: cx, dy: cy, len: beam, w });
-        for (const en of this.enemies) {
-          const dx = en.x - p.x;
-          const dy = en.y - p.y;
-          const along = dx * cx + dy * cy;
-          if (along < 0 || along > beam) continue;
-          if (Math.abs(dx * cy - dy * cx) < w + en.r) this.hit(en, 20 + ll * 10, cx * 40, cy * 40);
+        case 'laser': {
+          const used = new Set<number>();
+          for (let i = 0; i < w.amount; i++) {
+            const t = this.nearest(p.x, p.y, 500, used) ?? this.nearest(p.x, p.y, 500);
+            if (!t) break;
+            used.add(t.id);
+            const d = len(t.x - p.x, t.y - p.y) || 1;
+            this.shoot('laser', (t.x - p.x) / d, (t.y - p.y) / d, 420 * w.speed, w, 1.6, 7);
+          }
+          break;
+        }
+        case 'fish': {
+          for (let i = 0; i < w.amount; i++) {
+            const off = (i - (w.amount - 1) / 2) * 0.12;
+            const c = dcos(off);
+            const s = dsin(off);
+            this.shoot('fish', p.dx * c - p.dy * s, p.dx * s + p.dy * c, 620 * w.speed, w, 0.9, 8);
+          }
+          break;
+        }
+        case 'pot': {
+          for (let i = 0; i < w.amount; i++) {
+            const vx = (this.rng.next() - 0.5) * 2 * 160 + p.face * 40;
+            this.shots.push({
+              id: this.nextId++,
+              kind: 'pot',
+              x: p.x,
+              y: p.y,
+              vx: vx * w.speed,
+              vy: -560 * w.speed,
+              gravity: 1000 * w.speed * w.speed,
+              life: Math.round(1.5 * TICK_RATE),
+              dmg: w.dmg,
+              r: 14 * w.area,
+              pierce: w.pierce,
+              hits: [],
+            });
+          }
+          break;
+        }
+        case 'meow': {
+          const R = 62 * w.area;
+          this.emit({ t: 'wave', x: p.x, y: p.y, r: R });
+          for (const en of this.enemies) {
+            const dx = en.x - p.x;
+            const dy = en.y - p.y;
+            const d = len(dx, dy) || 1;
+            if (d < R + en.r) this.hit(en, w.dmg, (dx / d) * BALANCE.meowPush, (dy / d) * BALANCE.meowPush);
+          }
+          break;
+        }
+        case 'glass': {
+          for (let i = 0; i < w.amount; i++) {
+            const a = this.rng.next() * Math.PI * 2;
+            const d = 60 + this.rng.next() * 140;
+            this.zones.push({
+              id: this.nextId++,
+              x: p.x + dcos(a) * d,
+              y: p.y + dsin(a) * d,
+              r: 42 * w.area,
+              life: Math.round(w.duration * TICK_RATE),
+              dmg: w.dmg,
+            });
+          }
+          break;
+        }
+        case 'spark': {
+          const near = this.enemies.filter((en) => !en.dead && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y);
+          const R = 26 * w.area;
+          for (const t of this.rng.sample(near, w.amount)) {
+            this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
+            for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) this.hit(en, w.dmg, 0, 0);
+          }
+          break;
         }
       }
     }
   }
 
-  // Enemies walk to the cat; touching it hurts.
+  // Yarn balls spin for a while, then rest.
+  private spinYarn(w: WeaponStats): void {
+    const p = this.player;
+    if (this.yarnLeft <= 0) {
+      const rest = (this.cd.yarn ?? 0) - 1;
+      this.cd.yarn = rest;
+      if (rest > 0) return;
+      this.yarnLeft = Math.round(w.duration * TICK_RATE);
+      this.cd.yarn = Math.round(w.cd * TICK_RATE);
+    }
+    this.yarnLeft--;
+    this.yarnAngle += DT * 3.2 * w.speed;
+    const R = 72 * w.area;
+    const r = 11 * w.area;
+    for (let i = 0; i < w.amount; i++) {
+      const a = this.yarnAngle + (i * Math.PI * 2) / w.amount;
+      const c = dcos(a);
+      const s = dsin(a);
+      const x = p.x + c * R;
+      const y = p.y + s * R;
+      for (const en of this.enemies) {
+        if (en.dead || en.yarnTick > this.tick) continue;
+        if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + r) ** 2) {
+          en.yarnTick = this.tick + Math.round(0.5 * TICK_RATE);
+          this.hit(en, w.dmg, c * 60, s * 60);
+        }
+      }
+    }
+  }
+
+  // Enemies walk to the cat (or charge along their line); touching it hurts.
   private moveEnemies(): void {
     const p = this.player;
+    if (this.freeze > 0) {
+      this.freeze--;
+      return;
+    }
     for (const en of this.enemies) {
       const dx = p.x - en.x;
       const dy = p.y - en.y;
       const d = len(dx, dy) || 1;
-      en.x += ((dx / d) * en.speed + en.kx) * DT;
-      en.y += ((dy / d) * en.speed + en.ky) * DT;
+      if (d > DESPAWN_DISTANCE) {
+        // Left far behind: it comes back from the other side of the screen.
+        en.x = p.x + (dx / d) * SPAWN_DISTANCE;
+        en.y = p.y + (dy / d) * SPAWN_DISTANCE;
+        if (ENEMIES[en.kind].move === 'charge') this.aim(en);
+        continue;
+      }
+      let ux = dx / d;
+      let uy = dy / d;
+      if (ENEMIES[en.kind].move === 'charge') {
+        // Passed the cat and drove on: turn around.
+        if (d > SPAWN_DISTANCE && en.vx * dx + en.vy * dy < 0) this.aim(en);
+        ux = en.vx;
+        uy = en.vy;
+      }
+      en.x += (ux * en.speed + en.kx) * DT;
+      en.y += (uy * en.speed + en.ky) * DT;
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
       if (d < en.r + p.r && p.inv <= 0 && !en.dead) {
-        p.hp -= en.dmg;
-        p.inv = Math.round(0.5 * TICK_RATE);
-        this.emit({ t: 'hurt', dmg: en.dmg });
+        const dmg = Math.max(1, en.dmg - this.stats.armor);
+        p.hp -= dmg;
+        p.inv = Math.round(0.4 * TICK_RATE);
+        this.emit({ t: 'hurt', dmg });
         if (p.hp <= 0) {
           p.hp = 0;
           this.finish(false);
@@ -401,46 +723,67 @@ export class CatRun {
 
   // Cheap separation: enemies in the same grid cell push each other apart.
   private separate(): void {
-    const grid = new Map<number, Enemy[]>();
-    for (const en of this.enemies) {
-      const k = Math.floor(en.x / CELL) * 65536 + Math.floor(en.y / CELL);
-      const list = grid.get(k);
-      if (list) list.push(en);
-      else grid.set(k, [en]);
+    // Enemies hashed by grid cell into linked lists, in list order.
+    const list = this.enemies;
+    const n = list.length;
+    const keys = this.sepKeys;
+    const head = this.sepHead.fill(-1);
+    const next = this.sepNext;
+    for (let i = n - 1; i >= 0; i--) {
+      const k = Math.floor(list[i].x / CELL) * 65536 + Math.floor(list[i].y / CELL);
+      const h = (k * 2654435761) >>> 22; // 10 bits
+      keys[i] = k;
+      next[i] = head[h];
+      head[h] = i;
     }
-    for (const list of grid.values()) {
-      for (let i = 0; i < list.length; i++) {
-        for (let j = i + 1; j < list.length; j++) {
-          const a = list[i];
-          const b = list[j];
-          const dx = b.x - a.x;
-          const dy = b.y - a.y;
-          const d = len(dx, dy) || 0.01;
-          const min = a.r + b.r;
-          if (d < min) {
-            const push = (min - d) / 2;
-            a.x -= (dx / d) * push;
-            a.y -= (dy / d) * push;
-            b.x += (dx / d) * push;
-            b.y += (dy / d) * push;
-          }
-        }
+    for (let i = 0; i < n; i++) {
+      const a = list[i];
+      const k = keys[i];
+      // In a dense crowd each enemy pushes only a few neighbours per tick:
+      // they still spread out over a few ticks, at a fraction of the cost.
+      let left = SEPARATE_PAIRS;
+      for (let j = next[i]; j >= 0 && left > 0; j = next[j]) {
+        if (keys[j] !== k) continue;
+        left--;
+        const b = list[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const min = a.r + b.r;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= min * min) continue;
+        const d = Math.sqrt(d2) || 0.01;
+        const push = (min - d) / 2;
+        a.x -= (dx / d) * push;
+        a.y -= (dy / d) * push;
+        b.x += (dx / d) * push;
+        b.y += (dy / d) * push;
       }
     }
   }
 
   private moveShots(): void {
     for (const s of this.shots) {
+      s.vy += s.gravity * DT;
       s.x += s.vx * DT;
       s.y += s.vy * DT;
       s.life--;
       for (const en of this.enemies) {
         if (en.dead || s.life <= 0) continue;
-        if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 < (en.r + s.r) ** 2) {
-          this.hit(en, s.dmg, s.vx * 0.15, s.vy * 0.15);
-          if (s.pierce-- <= 0) s.life = 0;
-        }
+        if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 >= (en.r + s.r) ** 2 || s.hits.includes(en.id)) continue;
+        s.hits.push(en.id);
+        const v = len(s.vx, s.vy) || 1;
+        this.hit(en, s.dmg, (s.vx / v) * 40, (s.vy / v) * 40);
+        if (s.pierce-- <= 0) s.life = 0;
       }
+    }
+  }
+
+  // Puddles hurt everything inside twice a second.
+  private tickZones(): void {
+    for (const z of this.zones) {
+      z.life--;
+      if (z.life % 15 !== 0) continue;
+      for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0);
     }
   }
 
@@ -451,18 +794,47 @@ export class CatRun {
       const dx = p.x - g.x;
       const dy = p.y - g.y;
       const d = len(dx, dy) || 1;
-      if (d < this.magnet || g.pull) {
+      if (d < this.stats.magnet || g.pull) {
         g.pull = true;
-        const step = Math.min(d, 380 * DT);
+        const step = Math.min(d, Math.max(400, d * 2) * DT);
         g.x += (dx / d) * step;
         g.y += (dy / d) * step;
       }
       if (d < p.r + 6 && !g.got) {
         g.got = true;
-        this.xp += g.v;
+        this.xp += g.v * this.stats.growth;
       }
     }
     this.checkLevel();
+  }
+
+  private collectPickups(): void {
+    const p = this.player;
+    const reach = (p.r + 12) ** 2;
+    for (const it of this.pickups) {
+      if ((it.x - p.x) ** 2 + (it.y - p.y) ** 2 > reach) continue;
+      it.got = true;
+      this.emit({ t: 'pickup', kind: it.kind });
+      switch (it.kind) {
+        case 'food':
+          p.hp = Math.min(p.maxHp, p.hp + 30);
+          break;
+        case 'coin':
+          this.fish += 5;
+          break;
+        case 'catnip':
+          for (const g of this.gems) g.pull = true;
+          break;
+        case 'plug':
+          this.freeze = FREEZE_TICKS;
+          break;
+        case 'alarm':
+          for (const en of this.enemies) {
+            if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, 0);
+          }
+          break;
+      }
+    }
   }
 
   // ---------- levels ----------
@@ -470,22 +842,61 @@ export class CatRun {
     if (this.pending || this.over || this.xp < this.need) return;
     this.xp -= this.need;
     this.level++;
-    this.need = Math.round(this.need * 1.1 + 2);
-    const pool = UPGRADE_IDS.filter((k) => this.lvl(k) < UPGRADES[k].max);
-    if (!pool.length) return;
-    this.pending = this.rng.sample(pool, 3);
+    this.need = xpToNext(this.level);
+    this.recompute(); // Рыжик's armor grows with level
+    this.pending = this.offer();
     this.emit({ t: 'level' });
   }
 
-  private apply(k: UpgradeId): void {
-    this.up[k] = this.lvl(k) + 1;
-    const p = this.player;
-    if (k === 'speed') p.speed *= 1.12;
-    if (k === 'heart') {
-      p.maxHp += 25;
-      p.hp = Math.min(p.maxHp, p.hp + 40);
+  // 3 cards, sometimes 4 with luck: new items while slots are free, or a
+  // level more for what the cat has.
+  offer(): CardId[] {
+    const pool: ItemId[] = [];
+    for (const id of [...WEAPON_IDS, ...PASSIVE_IDS]) {
+      const l = this.lvl(id);
+      if (l >= itemMax(id)) continue;
+      if (l === 0 && (isWeapon(id) ? this.weapons().length : this.passives().length) >= SLOTS) continue;
+      pool.push(id);
     }
-    if (k === 'magnet') this.magnet += 60;
-    if (k === 'power') this.power *= 1.15;
+    if (!pool.length) {
+      if (this.fullTick < 0) this.fullTick = this.tick;
+      return ['snack', 'fishes'];
+    }
+    const four = this.rng.next() < 1 - 1 / this.stats.luck;
+    return this.rng.sample(pool, four ? 4 : 3);
+  }
+
+  private take(k: CardId): void {
+    if (k === 'snack') {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+      return;
+    }
+    if (k === 'fishes') {
+      this.fish += 10;
+      return;
+    }
+    this.items[k] = this.lvl(k) + 1;
+    this.recompute();
+  }
+
+  // Stats from the hero and the passives.
+  private recompute(): void {
+    const s: Stats = { ...BASE_STATS, ...HEROES[this.hero].stats };
+    const baseHp = s.maxHp;
+    for (const id of this.passives()) {
+      const per = PASSIVES[id].per;
+      const l = this.lvl(id);
+      for (const key of Object.keys(per) as (keyof Stats)[]) {
+        const v = per[key]! * l;
+        if (key === 'maxHp') s.maxHp += baseHp * v;
+        else s[key] += v;
+      }
+    }
+    if (this.hero === 'ryzhik') s.armor += Math.min(5, Math.floor(this.level / 10));
+    const p = this.player;
+    if (s.maxHp > p.maxHp) p.hp += s.maxHp - p.maxHp;
+    p.maxHp = s.maxHp;
+    p.hp = Math.min(p.hp, p.maxHp);
+    this.stats = s;
   }
 }

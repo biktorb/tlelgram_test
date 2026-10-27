@@ -57,7 +57,7 @@ test('the run waits while an upgrade is offered', () => {
   const tick = run.tick;
   run.step(1);
   assert.equal(run.tick, tick);
-  const offered = run.pending[1];
+  const offered = run.pending[1] as cats.ItemId;
   const before = run.lvl(offered);
   run.choose(1);
   assert.equal(run.lvl(offered), before + 1);
@@ -106,4 +106,33 @@ test('a run stopped halfway continues to the same result', () => {
   while (second.run.pending) second.choose(Number(rec.picks[pick++]));
   assert.deepEqual(second.run.result(), full.run.result());
   assert.deepEqual(replay(11, second.record()).result(), full.run.result(), 'the joined record replays the same');
+});
+
+test('a reroll swaps the cards once and replays the same', () => {
+  const rec = new Recorder(new CatRun(11));
+  while (!rec.run.pending) rec.step(0);
+  rec.reroll();
+  assert.equal(rec.run.rerolls, 0);
+  const after = rec.run.pending!.slice();
+  rec.reroll(); // none left: nothing changes
+  assert.deepEqual(rec.run.pending, after);
+  rec.choose(0);
+  for (let i = 0; i < 100; i++) rec.step(3);
+  const saved = rec.record();
+  assert.match(saved.picks, /^r0/);
+  const again = replay(11, saved);
+  assert.ok(again.lvl(after[0] as cats.ItemId) >= 1);
+  assert.deepEqual(cats.resume(11, saved).run.items, rec.run.items);
+});
+
+test('weapons go up to 8 and the slots hold 6 of each kind', () => {
+  const run = new CatRun(4);
+  for (let i = 0; i < 400 && !run.over; i++) {
+    run.xp = run.need;
+    run.step(0);
+    if (run.pending) run.choose(0);
+  }
+  for (const w of run.weapons()) assert.ok(run.lvl(w) <= 8);
+  for (const p of run.passives()) assert.ok(run.lvl(p) <= cats.itemMax(p));
+  assert.ok(run.weapons().length <= 6 && run.passives().length <= 6);
 });

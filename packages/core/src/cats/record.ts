@@ -7,7 +7,8 @@ import { CatRun, DIRECTIONS, RUN_TICKS } from './sim.ts';
 //
 // moves: one letter per direction ('a' is standing still, 'b'..'q' are the
 // 16 directions), followed by a repeat count when it is above 1: "a12c3d".
-// picks: one digit per level-up, the index of the chosen card.
+// picks: one digit per level-up, the index of the chosen card; 'r' before it
+// when the cards were rerolled.
 export interface RunRecord {
   moves: string;
   picks: string;
@@ -45,6 +46,12 @@ export class Recorder {
     this.run.choose(i);
   }
 
+  reroll(): void {
+    if (!this.run.pending || this.run.rerolls <= 0) return;
+    this.picks += 'r';
+    this.run.reroll();
+  }
+
   record(): RunRecord {
     this.flush();
     this.last = -1;
@@ -80,15 +87,16 @@ export function decodeMoves(moves: string, maxTicks = RUN_TICKS): number[] {
 // closed, or another engine rounded differently), the cat stands still until
 // the run is over, so every record has exactly one result.
 export function replay(seed: number, rec: RunRecord, opts: { events?: boolean } = {}): CatRun {
-  if (!/^[0-9]*$/.test(rec.picks) || rec.picks.length > 200) throw new Error('bad picks');
+  if (!/^[0-9r]*$/.test(rec.picks) || rec.picks.length > 400) throw new Error('bad picks');
   const dirs = decodeMoves(rec.moves);
   const run = new CatRun(seed, { events: opts.events ?? false });
   let pick = 0;
   let i = 0;
   while (!run.over) {
     if (run.pending) {
-      run.choose(pick < rec.picks.length ? Number(rec.picks[pick]) : 0);
-      pick++;
+      const c = rec.picks[pick++];
+      if (c === 'r') run.reroll();
+      else run.choose(c ? Number(c) : 0);
       continue;
     }
     run.step(i < dirs.length ? dirs[i] : 0);
@@ -107,7 +115,9 @@ export function resume(seed: number, rec: RunRecord, opts: { events?: boolean } 
   while (!r.run.over) {
     if (r.run.pending) {
       if (pick >= rec.picks.length) break;
-      r.choose(Number(rec.picks[pick++]));
+      const c = rec.picks[pick++];
+      if (c === 'r') r.reroll();
+      else r.choose(Number(c));
     } else if (i < dirs.length) r.step(dirs[i++]);
     else break;
   }

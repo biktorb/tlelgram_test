@@ -8,7 +8,7 @@
 // outlines are a darker shade of the fill, eyes are white with a pupil.
 // The drawn cat, dog and mouse are only used until the SVGs have loaded.
 
-export type SpriteId = 'cat' | 'mouse' | 'dog' | 'vacuum' | 'boss' | 'fish' | 'yarn';
+export type SpriteId = 'cat' | 'mouse' | 'dog' | 'dust' | 'vacuum' | 'boss' | 'fish' | 'yarn';
 
 const OUTLINE = '#3b3344';
 type Paint = (c: CanvasRenderingContext2D) => void;
@@ -122,6 +122,15 @@ const PAINT: Record<SpriteId, Paint> = {
     c.lineWidth = 3;
     c.strokeStyle = OUTLINE;
     c.stroke();
+  },
+  dust(c) {
+    // A fluffy grey dust bunny: a ring of tufts around a round body.
+    for (let i = 0; i < 10; i++) {
+      const a = (i * Math.PI) / 5;
+      blob(c, '#a9a6b4', () => c.arc(50 + Math.cos(a) * 30, 54 + Math.sin(a) * 27, 13, 0, Math.PI * 2), 3, '#76738a');
+    }
+    blob(c, '#bdbac8', () => c.arc(50, 54, 30, 0, Math.PI * 2), 0, '#bdbac8');
+    eyes(c, 50, 11, 6);
   },
   vacuum(c) {
     // A robot vacuum seen from above: disc, bumper, sensor eye.

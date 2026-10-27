@@ -8,6 +8,7 @@ import { verifyInitData, type AuthResult } from './auth.ts';
 import { Game, GameError, parseRecord, type Notifier } from './game.ts';
 import { TelegramNotifier } from './notify.ts';
 import { CLIENT_EVENTS, computeStats } from './stats.ts';
+import type { Replayer } from './replay.ts';
 import type { Store } from './store.ts';
 
 declare module 'fastify' {
@@ -19,7 +20,7 @@ declare module 'fastify' {
 export async function buildApp(
   config: Config,
   store: Store,
-  opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number } = {},
+  opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number; replay?: Replayer } = {},
 ): Promise<FastifyInstance> {
   // A 20-minute run record is a few tens of kilobytes.
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
@@ -29,7 +30,7 @@ export async function buildApp(
       : config.botToken
         ? new TelegramNotifier(config.botToken, config.telegramApi, config.appLink, (m) => app.log.warn(m))
         : null;
-  const game = new Game(store, notifier, opts.now);
+  const game = new Game(store, notifier, opts.now, opts.replay);
   const duelLink = (code: string) => (config.appLink ? `${config.appLink}?startapp=d_${code}` : null);
 
   await app.register(cors, { origin: config.corsOrigins.length ? config.corsOrigins : false });

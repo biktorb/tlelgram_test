@@ -1,59 +1,97 @@
-import type { UpgradeId } from './content.ts';
+import type { CardId } from './content.ts';
 import { dirFromVector, Recorder } from './record.ts';
-import { CatRun } from './sim.ts';
+import { CatRun, DIR_VECTORS } from './sim.ts';
 
 // A simple player for balance checks and tests: runs from nearby enemies,
 // picks up gems when it is safe, and takes upgrades by a fixed preference.
 export interface BotStyle {
   fear: number; // how far away enemies start to matter
-  prefer: readonly UpgradeId[];
+  prefer: readonly CardId[];
 }
 
+// Weapons first, then the passives that help them most.
 export const BOT_STYLES: Record<string, BotStyle> = {
-  fish: { fear: 160, prefer: ['fish', 'power', 'speed', 'heart', 'magnet', 'meow', 'yarn', 'laser'] },
-  yarn: { fear: 150, prefer: ['yarn', 'heart', 'meow', 'speed', 'power', 'fish', 'magnet', 'laser'] },
-  laser: { fear: 170, prefer: ['laser', 'meow', 'power', 'speed', 'fish', 'heart', 'yarn', 'magnet'] },
-  mixed: { fear: 160, prefer: ['meow', 'yarn', 'fish', 'laser', 'speed', 'heart', 'power', 'magnet'] },
+  ranged: {
+    fear: 160,
+    prefer: ['laser', 'fish', 'claws', 'pot', 'spark', 'yarn', 'pack', 'box', 'food', 'belly', 'paws', 'catnip', 'bigpaws', 'patience', 'purr', 'blackcat', 'meow', 'glass', 'snack', 'fishes'],
+  },
+  melee: {
+    fear: 150,
+    prefer: ['claws', 'meow', 'yarn', 'glass', 'laser', 'pot', 'bigpaws', 'belly', 'food', 'box', 'patience', 'purr', 'pack', 'catnip', 'paws', 'blackcat', 'fish', 'spark', 'snack', 'fishes'],
+  },
+  mixed: {
+    fear: 160,
+    prefer: ['claws', 'laser', 'yarn', 'meow', 'spark', 'pot', 'fish', 'glass', 'box', 'pack', 'food', 'bigpaws', 'belly', 'patience', 'catnip', 'purr', 'paws', 'blackcat', 'snack', 'fishes'],
+  },
 };
+
+// Looks a moment ahead in every direction and takes the one that keeps
+// enemies just outside `fear` (close enough for short weapons to reach them)
+// and leads to gems.
+const LOOK = 0.35; // seconds ahead
 
 export function botMove(run: CatRun, style: BotStyle): number {
   const p = run.player;
-  let fx = 0;
-  let fy = 0;
-  let danger = 0;
-  for (const en of run.enemies) {
-    const dx = p.x - en.x;
-    const dy = p.y - en.y;
-    const d2 = dx * dx + dy * dy;
-    const reach = style.fear + en.r;
-    if (d2 > reach * reach) continue;
-    const d = Math.sqrt(d2) || 1;
-    const w = (en.dmg / 5) * (1 - d / reach) ** 2;
-    fx += (dx / d) * w;
-    fy += (dy / d) * w;
-    danger += w;
-  }
-  // Gems pull harder when nothing is close.
-  let best = Infinity;
-  let gx = 0;
-  let gy = 0;
+  let bestDir = 0;
+  let bestScore = -Infinity;
+  // The nearest gem or thing on the floor, worth walking to. Things count
+  // as twice nearer, and food only when hurt.
+  let gem: { x: number; y: number } | null = null;
+  let gd = 700 * 700;
   for (const g of run.gems) {
     const d2 = (g.x - p.x) ** 2 + (g.y - p.y) ** 2;
-    if (d2 < best) {
-      best = d2;
-      gx = g.x - p.x;
-      gy = g.y - p.y;
+    if (d2 < gd) {
+      gd = d2;
+      gem = g;
     }
   }
-  if (best < 300 * 300) {
-    const d = Math.sqrt(best) || 1;
-    const w = 0.4 / (1 + danger * 4);
-    fx += (gx / d) * w;
-    fy += (gy / d) * w;
+  for (const it of run.pickups) {
+    if (it.kind === 'food' && p.hp > p.maxHp * 0.7) continue;
+    const d2 = ((it.x - p.x) ** 2 + (it.y - p.y) ** 2) / 4;
+    if (d2 < gd) {
+      gd = d2;
+      gem = it;
+    }
   }
-  // Nothing near and nothing to pick up: wait for the swarm.
-  if (danger === 0 && best >= 300 * 300) return 0;
-  return dirFromVector(fx, fy, 0.01);
+  const step = run.stats.move * LOOK;
+  // A hurt cat plays safer.
+  const care = 1 + 3 * (1 - p.hp / p.maxHp);
+  for (let dir = 0; dir < DIR_VECTORS.length; dir++) {
+    const [mx, my] = DIR_VECTORS[dir];
+    const qx = p.x + mx * step;
+    const qy = p.y + my * step;
+    let score = 0;
+    let close = Infinity;
+    // The claws hit the side the cat faces: turning to the swarm pays.
+    const face = mx > 0.01 ? 1 : mx < -0.01 ? -1 : p.face;
+    const claws = run.lvl('claws') > 0;
+    for (const en of run.enemies) {
+      let dx = qx - en.x;
+      let dy = qy - en.y;
+      let d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (d > 400) continue;
+      // Where the enemy will be by then.
+      const move = Math.min(d, en.speed * LOOK);
+      const charge = en.vx !== 0 || en.vy !== 0;
+      const ex = en.x + (charge ? en.vx * en.speed * LOOK : (dx / d) * move);
+      const ey = en.y + (charge ? en.vy * en.speed * LOOK : (dy / d) * move);
+      dx = qx - ex;
+      dy = qy - ey;
+      d = Math.sqrt(dx * dx + dy * dy);
+      const reach = style.fear + en.r + p.r;
+      if (d < reach) score -= en.dmg * care * (1 + ((reach - d) / reach) * 4);
+      if (d < close) close = d;
+      if (claws && Math.abs(ex - (qx + face * 70)) < 65 + en.r && Math.abs(ey - qy) < 17 + en.r) score += 2.5;
+    }
+    // Stay near the swarm rather than run off.
+    if (close < Infinity && close > style.fear * 2) score -= (close - style.fear * 2) * 0.02;
+    if (gem) score -= Math.sqrt((gem.x - qx) ** 2 + (gem.y - qy) ** 2) * 0.25;
+    if (score > bestScore) {
+      bestScore = score;
+      bestDir = dir;
+    }
+  }
+  return bestDir;
 }
 
 export function botPick(run: CatRun, style: BotStyle): number {
@@ -77,9 +115,9 @@ export interface BotSkill {
 }
 
 export const BOT_SKILLS: Record<'sharp' | 'casual' | 'slow', BotSkill> = {
-  sharp: { react: 1, fear: 160 },
-  casual: { react: 10, fear: 100 },
-  slow: { react: 30, fear: 100 },
+  sharp: { react: 3, fear: 25 },
+  casual: { react: 8, fear: 25 },
+  slow: { react: 12, fear: 25 },
 };
 
 // Plays a whole run and returns its record.
