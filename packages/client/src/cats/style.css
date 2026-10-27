@@ -102,3 +102,4 @@ html, body {
 .up .ico { width: 26px; height: 26px; }
 .up .ico.emoji { font-size: 20px; line-height: 26px; }
 .up b { font-size: 14px; }
+.credit { position: absolute; bottom: calc(10px + env(safe-area-inset-bottom)); font-size: 11px; color: var(--muted); text-decoration: none; }

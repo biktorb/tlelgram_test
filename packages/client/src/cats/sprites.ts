@@ -1,31 +1,43 @@
 // Sprites are drawn once into small canvases and then blitted: drawing paths
 // for 260 enemies every frame is too slow on phones. Each sprite is drawn in
 // a 100×100 box centred on the creature; the game scales it to the hitbox.
-// These flat vector drawings are placeholders until the sprite pack arrives.
+//
+// The cat, dog and mouse come from «Animals pack» by Olga Bikmullina
+// (CC-BY 3.0, https://opengameart.org/content/animals-pack), cut into
+// public/sprites/*.svg. The rest is drawn here in the same flat style:
+// outlines are a darker shade of the fill, eyes are white with a pupil.
+// The drawn cat, dog and mouse are only used until the SVGs have loaded.
 
 export type SpriteId = 'cat' | 'mouse' | 'dog' | 'vacuum' | 'boss' | 'fish' | 'yarn';
 
-const OUTLINE = '#2a2233';
+const OUTLINE = '#3b3344';
 type Paint = (c: CanvasRenderingContext2D) => void;
 
-function blob(c: CanvasRenderingContext2D, fill: string, draw: () => void, line = 4): void {
+function blob(c: CanvasRenderingContext2D, fill: string, draw: () => void, line = 4, stroke = OUTLINE): void {
   c.beginPath();
   draw();
   c.fillStyle = fill;
   c.fill();
   c.lineWidth = line;
-  c.strokeStyle = OUTLINE;
+  c.strokeStyle = stroke;
   c.stroke();
 }
 
 function eyes(c: CanvasRenderingContext2D, y: number, gap: number, r: number, angry = false): void {
   for (const s of [-1, 1]) {
     c.beginPath();
-    c.ellipse(50 + s * gap, y, r * 0.8, r, 0, 0, Math.PI * 2);
+    c.arc(50 + s * gap, y, r * 1.25, 0, Math.PI * 2);
+    c.fillStyle = '#fff';
+    c.fill();
+    c.lineWidth = 1.5;
+    c.strokeStyle = '#c9cbd6';
+    c.stroke();
+    c.beginPath();
+    c.arc(50 + s * gap + s * r * 0.2, y + r * 0.1, r * 0.65, 0, Math.PI * 2);
     c.fillStyle = OUTLINE;
     c.fill();
     c.beginPath();
-    c.arc(50 + s * gap + r * 0.25, y - r * 0.35, r * 0.3, 0, Math.PI * 2);
+    c.arc(50 + s * gap + s * r * 0.2 + r * 0.2, y - r * 0.2, r * 0.22, 0, Math.PI * 2);
     c.fillStyle = '#fff';
     c.fill();
     if (angry) {
@@ -113,31 +125,24 @@ const PAINT: Record<SpriteId, Paint> = {
   },
   vacuum(c) {
     // A robot vacuum seen from above: disc, bumper, sensor eye.
-    blob(c, '#3d4458', () => c.arc(50, 50, 44, 0, Math.PI * 2));
+    blob(c, '#6b7489', () => c.arc(50, 50, 43, 0, Math.PI * 2), 5, '#454c5e');
     c.beginPath();
-    c.arc(50, 50, 44, Math.PI * 1.15, Math.PI * 1.85);
-    c.lineWidth = 9;
-    c.strokeStyle = '#9aa3b8';
+    c.arc(50, 50, 40, Math.PI * 1.12, Math.PI * 1.88);
+    c.lineWidth = 8;
+    c.strokeStyle = '#b4bccc';
     c.stroke();
-    blob(c, '#5b6480', () => c.arc(50, 54, 26, 0, Math.PI * 2), 3);
-    c.beginPath();
-    c.arc(50, 54, 9, 0, Math.PI * 2);
-    c.fillStyle = '#ff4d5e';
-    c.fill();
-    c.beginPath();
-    c.arc(53, 51, 3, 0, Math.PI * 2);
-    c.fillStyle = '#ffd1d6';
-    c.fill();
+    blob(c, '#828ba0', () => c.arc(50, 56, 25, 0, Math.PI * 2), 3, '#5a6276');
+    eyes(c, 54, 10, 6, true);
   },
   boss(c) {
     // An angry mop: handle, head, strings.
     c.save();
     c.translate(50, 50);
     c.rotate(-0.35);
-    blob(c, '#c48a4a', () => c.rect(-5, -48, 10, 52), 3);
-    blob(c, '#4a7bd9', () => c.rect(-26, 0, 52, 16), 3);
-    c.fillStyle = '#e8ecf5';
-    c.strokeStyle = OUTLINE;
+    blob(c, '#d39a5b', () => c.rect(-5, -48, 10, 52), 3, '#9a6a35');
+    blob(c, '#5b8ce0', () => c.rect(-26, 0, 52, 16), 3, '#3863ad');
+    c.fillStyle = '#f1f3f8';
+    c.strokeStyle = '#bcc2d1';
     c.lineWidth = 2;
     for (let i = 0; i < 9; i++) {
       c.beginPath();
@@ -146,26 +151,34 @@ const PAINT: Record<SpriteId, Paint> = {
       c.stroke();
     }
     c.restore();
-    eyes(c, 60, 10, 5, true);
+    eyes(c, 62, 10, 5, true);
   },
   fish(c) {
-    blob(c, '#7fc8f8', () => {
-      c.ellipse(44, 50, 30, 16, 0, 0, Math.PI * 2);
-    });
-    blob(c, '#4fa3d9', () => {
-      c.moveTo(70, 50);
-      c.lineTo(92, 34);
-      c.lineTo(92, 66);
-      c.closePath();
-    });
+    blob(c, '#8fd0f7', () => c.ellipse(44, 50, 30, 16, 0, 0, Math.PI * 2), 4, '#4f9ccc');
+    blob(
+      c,
+      '#5fb0e0',
+      () => {
+        c.moveTo(70, 50);
+        c.lineTo(92, 34);
+        c.lineTo(92, 66);
+        c.closePath();
+      },
+      4,
+      '#3f86b5',
+    );
     c.beginPath();
-    c.arc(28, 46, 4, 0, Math.PI * 2);
+    c.arc(28, 46, 4.5, 0, Math.PI * 2);
+    c.fillStyle = '#fff';
+    c.fill();
+    c.beginPath();
+    c.arc(27, 46, 2.5, 0, Math.PI * 2);
     c.fillStyle = OUTLINE;
     c.fill();
   },
   yarn(c) {
-    blob(c, '#e4577b', () => c.arc(50, 50, 38, 0, Math.PI * 2));
-    c.strokeStyle = '#b8355a';
+    blob(c, '#ee7396', () => c.arc(50, 50, 38, 0, Math.PI * 2), 5, '#c04a6e');
+    c.strokeStyle = '#c95479';
     c.lineWidth = 4;
     for (const a of [-0.6, 0, 0.6]) {
       c.beginPath();
@@ -176,6 +189,27 @@ const PAINT: Record<SpriteId, Paint> = {
 };
 
 const cache = new Map<string, HTMLCanvasElement>();
+const images = new Map<SpriteId, HTMLImageElement>();
+const IMAGE_SPRITES: SpriteId[] = ['cat', 'dog', 'mouse'];
+
+// Loads the pack sprites. Resolves even if some fail: the drawn ones stay.
+export function loadSprites(): Promise<void> {
+  return Promise.all(
+    IMAGE_SPRITES.map(
+      (id) =>
+        new Promise<void>((done) => {
+          const img = new Image();
+          img.onload = () => {
+            images.set(id, img);
+            for (const key of [...cache.keys()]) if (key.includes(`${id}:`)) cache.delete(key);
+            done();
+          };
+          img.onerror = () => done();
+          img.src = `./sprites/${id}.svg`;
+        }),
+    ),
+  ).then(() => undefined);
+}
 
 // Returns the sprite drawn at `px` device pixels square, mirrored if `flip`.
 export function sprite(id: SpriteId, px: number, flip = false): HTMLCanvasElement {
@@ -190,10 +224,14 @@ export function sprite(id: SpriteId, px: number, flip = false): HTMLCanvasElemen
       c.translate(size, 0);
       c.scale(-1, 1);
     }
-    c.scale(size / 100, size / 100);
-    c.lineJoin = 'round';
-    c.lineCap = 'round';
-    PAINT[id](c);
+    const img = images.get(id);
+    if (img) c.drawImage(img, 0, 0, size, size);
+    else {
+      c.scale(size / 100, size / 100);
+      c.lineJoin = 'round';
+      c.lineCap = 'round';
+      PAINT[id](c);
+    }
     cache.set(key, s);
   }
   return s;
