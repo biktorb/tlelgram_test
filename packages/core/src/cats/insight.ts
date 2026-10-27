@@ -1,4 +1,4 @@
-import type { CardId, EnemyKind, ItemId, WeaponId } from './content.ts';
+import type { CardId, EnemyKind, HeroId, ItemId, WeaponId } from './content.ts';
 import { decodeMoves, type RunRecord } from './record.ts';
 import { CatRun, TICK_RATE } from './sim.ts';
 
@@ -6,6 +6,7 @@ import { CatRun, TICK_RATE } from './sim.ts';
 // from, how the minutes went and what was picked. The owner's admin page
 // shows it to see how people actually play.
 export interface RunInsight {
+  hero: HeroId;
   won: boolean;
   seconds: number;
   kills: number;
@@ -34,11 +35,12 @@ export interface MinuteInsight {
 
 const MINUTE = 60 * TICK_RATE;
 
-export function analyze(seed: number, rec: RunRecord): RunInsight {
+export function analyze(seed: number, rec: RunRecord, hero?: HeroId): RunInsight {
   if (!/^[0-9r]*$/.test(rec.picks) || rec.picks.length > 400) throw new Error('bad picks');
   const dirs = decodeMoves(rec.moves);
-  const run = new CatRun(seed, { events: true });
+  const run = new CatRun(seed, { events: true, hero });
   const out: RunInsight = {
+    hero: run.hero,
     won: false,
     seconds: 0,
     kills: 0,

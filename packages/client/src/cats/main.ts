@@ -1,13 +1,14 @@
 import { cats, FRAMES } from '@otryad/core';
 import { haptic, initTelegram, setBack, shareLink, startParam } from '../telegram.ts';
-import { ApiError, connect, type Finished, type Profile, type Score, type Started } from './api.ts';
+import { ApiError, connect, type Finished, type HeroInfo, type Profile, type Score, type Started } from './api.ts';
 import { Game, type RunRecord } from './game.ts';
-import { loadSprites, sprite, type SpriteId } from './sprites.ts';
+import { catSprite, loadSprites, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
 const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
 type CardId = cats.CardId;
 type ItemId = cats.ItemId;
+type HeroId = cats.HeroId;
 type CatRun = InstanceType<typeof cats.CatRun>;
 
 initTelegram();
@@ -22,7 +23,8 @@ let serverRun: Started['run'] | null = null;
 // ---------- saved data (this device) ----------
 interface Saved {
   best?: { ticks: number; kills: number; won: boolean };
-  last?: { seed: number; record: RunRecord; ticks: number; kills: number };
+  last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId };
+  hero?: HeroId; // the cat picked for the next run
 }
 function load(): Saved {
   try {
@@ -38,6 +40,11 @@ function save(s: Saved): void {
     // Private mode: the run just is not remembered.
   }
 }
+
+const chosenHero = (): HeroId => {
+  const id = load().hero;
+  return id && cats.isHero(id) ? id : 'ryzhik';
+};
 
 // ---------- helpers ----------
 const mmss = (ticks: number) => {
@@ -98,10 +105,10 @@ function icon(id: CardId, px = 40): HTMLElement {
   return h('span', 'ico emoji', v);
 }
 
-function catPicture(px: number): HTMLCanvasElement {
+function catPicture(px: number, hero: HeroId = chosenHero()): HTMLCanvasElement {
   const c = h('canvas', 'hero');
   c.width = c.height = px * 2;
-  c.getContext('2d')!.drawImage(sprite('cat', px * 2), 0, 0);
+  c.getContext('2d')!.drawImage(catSprite(hero, px * 2), 0, 0);
   c.style.width = c.style.height = `${px}px`;
   return c;
 }
@@ -160,11 +167,15 @@ function menu(): void {
     h('p', '', `Ведите кота пальцем, он атакует сам. Собирайте кристаллы, выбирайте улучшения и продержитесь ${RUN_SECONDS / 60} минут.`),
   );
   if (s.best) box.append(h('p', 'best', `Рекорд: ${scoreText(s.best)}`));
+  const hero = cats.HEROES[chosenHero()];
+  box.append(button(`🐱 Кот: ${hero.name} · сменить`, 'btn secondary small', () => heroScreen()));
   const buttons = h('div', 'buttons');
   buttons.append(button('Играть', 'btn', () => startServer('free')));
   if (s.last) {
     const last = s.last;
-    buttons.append(button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record })));
+    buttons.append(
+      button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record, ghostHero: last.hero, hero: chosenHero() })),
+    );
   }
   box.append(buttons);
 
@@ -203,11 +214,11 @@ const progressTicks = (rec: RunRecord | null) => (rec ? cats.decodeMoves(rec.mov
 // ---------- playing ----------
 async function startServer(mode: 'free' | 'daily' | 'duel', duel?: string): Promise<void> {
   if (!api) {
-    play((Math.random() * 2 ** 32) >>> 0);
+    play((Math.random() * 2 ** 32) >>> 0, { hero: chosenHero() });
     return;
   }
   try {
-    playServer(await api.start(mode, duel));
+    playServer(await api.start(mode, chosenHero(), duel));
   } catch (e) {
     toast(errorText(e));
   }
@@ -215,7 +226,13 @@ async function startServer(mode: 'free' | 'daily' | 'duel', duel?: string): Prom
 
 function playServer(s: Started): void {
   serverRun = s.run;
-  play(s.run.seed, { ghost: s.ghost?.record, progress: s.run.progress ?? undefined, ghostName: s.ghost?.name });
+  play(s.run.seed, {
+    ghost: s.ghost?.record,
+    ghostHero: s.ghost?.hero,
+    progress: s.run.progress ?? undefined,
+    ghostName: s.ghost?.name,
+    hero: s.run.hero,
+  });
 }
 
 function saveProgress(): void {
@@ -223,7 +240,7 @@ function saveProgress(): void {
   api.progress(serverRun.id, game.rec.record()).catch(() => {});
 }
 
-function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; ghostName?: string } = {}): void {
+function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; ghostName?: string; hero?: HeroId; ghostHero?: HeroId } = {}): void {
   stopGame();
   ui.replaceChildren(hud(opts.ghostName));
   setBack(() => pauseMenu());
@@ -351,7 +368,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   const mine = { won: run.won, ticks: run.tick, kills: run.kills };
   const better = !s.best || cats.compareScores(mine, s.best) < 0;
   if (better) s.best = mine;
-  s.last = { seed, record, ticks: run.tick, kills: run.kills };
+  s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero };
   save(s);
 
   const playedRun = serverRun;
@@ -380,7 +397,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     ups.append(u);
   }
   const box = overlay(
-    run.won ? catPicture(100) : h('div', 'big', '😿'),
+    run.won ? catPicture(100, run.hero) : h('div', 'big', '😿'),
     h('h1', '', run.won ? 'Кот выстоял!' : 'Кота засосало'),
     h('p', 'result', `${mmss(run.tick)} · ${run.kills} врагов · уровень ${run.level}`),
     ...(run.tick > RUN_SECONDS * TICK_RATE ? [h('p', 'best', `От Уборщицы ${Math.floor((run.tick - RUN_SECONDS * TICK_RATE) / TICK_RATE)} с`)] : []),
@@ -411,6 +428,63 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   );
   box.append(buttons);
   ui.append(box);
+}
+
+// ---------- cats ----------
+// Every cat with its weapon, stats and bonus; the locked ones show how to open them.
+function heroScreen(): void {
+  screen('Коты', async (box) => {
+    const render = (list: HeroInfo[], fish: number | null) => {
+      box.replaceChildren(h('p', '', 'У каждого кота своё первое оружие и бонус, который растёт с уровнем. В дуэли каждый играет своим котом.'));
+      if (fish !== null) box.append(h('p', 'best', `🐟 ${fish}`));
+      const chosen = chosenHero();
+      for (const info of list) {
+        const def: cats.HeroDef = cats.HEROES[info.id];
+        const card = h('div', `herocard${info.id === chosen ? ' on' : ''}`);
+        const text = h('div', 'text');
+        const hp = def.stats.maxHp ?? cats.BASE_STATS.maxHp;
+        const speed = Math.round((100 * (def.stats.move ?? cats.BASE_STATS.move)) / cats.BASE_STATS.move);
+        text.append(
+          h('b', '', `${def.name}, ${def.title}`),
+          h('span', '', `${cats.WEAPONS[def.weapon].name} · ❤ ${hp} · скорость ${speed}%`),
+          h('span', '', def.bonus),
+        );
+        card.append(catPicture(56, info.id), text);
+        if (info.id === chosen) card.append(h('span', 'lv', 'выбран'));
+        else if (info.owned) {
+          card.append(
+            button('Выбрать', 'btn small', () => {
+              save({ ...load(), hero: info.id });
+              render(list, fish);
+            }),
+          );
+        } else {
+          const u: cats.HeroDef['unlock'] = def.unlock;
+          if (u && 'fish' in u) {
+            const b = button(`${u.fish} 🐟`, 'btn small', async () => {
+              try {
+                const p = await api!.shop('buy', `hero:${info.id}`);
+                save({ ...load(), hero: info.id });
+                render(p.heroes, p.fish);
+              } catch (e) {
+                toast(errorText(e));
+              }
+            });
+            b.disabled = !api || info.have < info.need;
+            card.append(b);
+          } else card.append(h('span', 'lv', `🔒 ${cats.unlockText(info.id)}: ${info.have}/${info.need}`));
+        }
+        box.append(card);
+      }
+    };
+    if (!api) {
+      // Without the server every cat can be tried on this device.
+      render(cats.HERO_IDS.map((id) => ({ id, owned: true, have: 0, need: 0 })), null);
+      return;
+    }
+    const p = await api.profile();
+    render(p.heroes, p.fish);
+  });
 }
 
 // ---------- server screens ----------

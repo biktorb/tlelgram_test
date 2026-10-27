@@ -237,14 +237,61 @@ export function xpToNext(level: number): number {
   return 455 + (level - 40) * 16;
 }
 
-// The hero: for now only Рыжик (more come with the other cats).
+// The cats, like the heroes of VS: own starting weapon and stats, and a
+// bonus that grows with the cat's level (applied in CatRun.recompute).
 export interface HeroDef {
   name: string;
+  title: string;
   weapon: WeaponId;
   stats: Partial<Stats>;
+  bonus: string;
+  // How the cat is opened: for fish in the shop, or by an achievement.
+  unlock: { fish: number } | { surviveMin: number } | { kills: number } | null;
 }
 
 export const HEROES = {
-  ryzhik: { name: 'Рыжик', weapon: 'claws', stats: { maxHp: 120, armor: 1 } },
+  ryzhik: {
+    name: 'Рыжик',
+    title: 'дворовый боец',
+    weapon: 'claws',
+    stats: { maxHp: 120, armor: 1 },
+    bonus: '+1 броня каждые 10 уровней, до +5',
+    unlock: null,
+  },
+  murka: {
+    name: 'Мурка',
+    title: 'сиамская умница',
+    weapon: 'laser',
+    stats: {},
+    bonus: '+10% опыта, +20% с 10 уровня, +30% с 20-го',
+    unlock: { fish: 300 },
+  },
+  barsik: {
+    name: 'Барсик',
+    title: 'пухлый мейн-кун',
+    weapon: 'yarn',
+    stats: { maxHp: 160, move: 150 * 0.85 },
+    bonus: '+10% области атак, +20% с 10 уровня, +30% с 20-го',
+    unlock: { surviveMin: 10 },
+  },
+  snezhok: {
+    name: 'Снежок',
+    title: 'шустрый сфинкс',
+    weapon: 'fish',
+    stats: { maxHp: 80, move: 150 * 1.25 },
+    bonus: '+1 снаряд ко всему оружию с 20 уровня',
+    unlock: { kills: 5000 },
+  },
 } satisfies Record<string, HeroDef>;
 export type HeroId = keyof typeof HEROES;
+export const HERO_IDS = Object.keys(HEROES) as HeroId[];
+export const isHero = (id: unknown): id is HeroId => typeof id === 'string' && Object.hasOwn(HEROES, id);
+
+// How the unlock reads in the cat list.
+export function unlockText(id: HeroId): string {
+  const u: HeroDef['unlock'] = HEROES[id].unlock;
+  if (!u) return 'открыт сразу';
+  if ('fish' in u) return `${u.fish} рыбок`;
+  if ('surviveMin' in u) return `продержаться ${u.surviveMin} минут`;
+  return `победить ${u.kills} врагов за все забеги`;
+}

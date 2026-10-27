@@ -8,6 +8,8 @@
 // outlines are a darker shade of the fill, eyes are white with a pupil.
 // The drawn cat, dog and mouse are only used until the SVGs have loaded.
 
+import type { cats } from '@otryad/core';
+
 export type SpriteId = 'cat' | 'mouse' | 'dog' | 'dust' | 'cleaner' | 'vacuum' | 'boss' | 'fish' | 'yarn';
 
 const OUTLINE = '#3b3344';
@@ -273,6 +275,35 @@ export function flashSprite(id: SpriteId, px: number, flip = false): HTMLCanvasE
     c.globalCompositeOperation = 'source-in';
     c.fillStyle = '#fff';
     c.fillRect(0, 0, s.width, s.height);
+    cache.set(key, s);
+  }
+  return s;
+}
+
+// The cats share one picture, each in its own coat colour.
+const COATS: Record<cats.HeroId, string | null> = { ryzhik: '#f2a25a', murka: '#f1dfc2', barsik: '#7d6e62', snezhok: '#f2b9b2' };
+export const CAT_SIZE: Record<cats.HeroId, number> = { ryzhik: 46, murka: 44, barsik: 54, snezhok: 42 };
+
+export function catSprite(hero: cats.HeroId, px: number, flip = false): HTMLCanvasElement {
+  const coat = COATS[hero];
+  const base = sprite('cat', px, flip);
+  if (!coat) return base;
+  const key = `coat:${hero}:${base.width}:${flip}:${images.has('cat')}`;
+  let s = cache.get(key);
+  if (!s) {
+    s = document.createElement('canvas');
+    s.width = base.width;
+    s.height = base.height;
+    const c = s.getContext('2d')!;
+    c.drawImage(base, 0, 0);
+    c.globalCompositeOperation = 'source-atop';
+    c.globalAlpha = 0.6;
+    c.fillStyle = coat;
+    c.fillRect(0, 0, s.width, s.height);
+    // Keep the outline and the eyes: draw the dark parts back on top.
+    c.globalCompositeOperation = 'multiply';
+    c.globalAlpha = 0.5;
+    c.drawImage(base, 0, 0);
     cache.set(key, s);
   }
   return s;

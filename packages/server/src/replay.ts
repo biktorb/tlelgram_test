@@ -5,18 +5,19 @@ import type { RunRecord } from './store.ts';
 
 export type RunResult = ReturnType<cats.CatRun['result']>;
 // Replays a record and returns what the run achieved; throws on a bad record.
-export type Replayer = (seed: number, rec: RunRecord) => Promise<RunResult>;
+export type Replayer = (seed: number, rec: RunRecord, hero?: cats.HeroId) => Promise<RunResult>;
 
 // In the same thread: for tests and the in-memory dev server.
-export const replayHere: Replayer = async (seed, rec) => cats.replay(seed, rec).result();
+export const replayHere: Replayer = async (seed, rec, hero) => cats.replay(seed, rec, { hero }).result();
 
 // Replays a record with events to see how the run went, for the admin page.
-export type Analyzer = (seed: number, rec: RunRecord) => Promise<cats.RunInsight>;
-export const analyzeHere: Analyzer = async (seed, rec) => cats.analyze(seed, rec);
+export type Analyzer = (seed: number, rec: RunRecord, hero?: cats.HeroId) => Promise<cats.RunInsight>;
+export const analyzeHere: Analyzer = async (seed, rec, hero) => cats.analyze(seed, rec, hero);
 
 interface Job {
   seed: number;
   rec: RunRecord;
+  hero?: cats.HeroId;
   analyze: boolean;
   resolve: (r: never) => void;
   reject: (e: Error) => void;
@@ -34,7 +35,7 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
       const w = idle.pop()!;
       const job = queue.shift()!;
       busy.set(w, job);
-      w.postMessage({ seed: job.seed, rec: job.rec, analyze: job.analyze });
+      w.postMessage({ seed: job.seed, rec: job.rec, hero: job.hero, analyze: job.analyze });
     }
   };
   const spawn = () => {
@@ -63,9 +64,9 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
 
   const job =
     <T>(analyze: boolean) =>
-    (seed: number, rec: RunRecord) =>
+    (seed: number, rec: RunRecord, hero?: cats.HeroId) =>
       new Promise<T>((resolve, reject) => {
-        queue.push({ seed, rec, analyze, resolve, reject });
+        queue.push({ seed, rec, hero, analyze, resolve, reject });
         pump();
       });
   return Object.assign(job<RunResult>(false), {
