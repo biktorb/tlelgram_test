@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Прототип: Коты против пылесосов</title>
+<script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+<style>
+  :root { --ink: #fff; --muted: #b9c2d6; --accent: #ffcf3f; --bg: #1d2333; }
+  html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; font-family: system-ui, -apple-system, sans-serif; color: var(--ink); }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .hud { position: fixed; left: 0; right: 0; top: 0; padding: 10px 12px calc(6px) ; display: flex; flex-direction: column; gap: 6px; pointer-events: none; padding-top: max(10px, env(safe-area-inset-top)); }
+  .xp { height: 8px; border-radius: 4px; background: rgba(255,255,255,.15); overflow: hidden; }
+  .xp i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #5ad1ff, #8e7bff); transition: width .15s; }
+  .row { display: flex; justify-content: space-between; font-weight: 700; font-size: 15px; text-shadow: 0 1px 2px #000; }
+  .overlay { position: fixed; inset: 0; background: rgba(10, 14, 24, .78); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; }
+  .overlay h1 { margin: 0; font-size: 26px; }
+  .overlay p { margin: 0; color: var(--muted); max-width: 320px; line-height: 1.4; }
+  .choices { display: flex; flex-direction: column; gap: 10px; width: min(340px, 100%); }
+  .choice { display: flex; gap: 12px; align-items: center; text-align: left; padding: 12px; border-radius: 14px; border: 2px solid rgba(255,255,255,.15); background: #2a3247; color: var(--ink); font: inherit; cursor: pointer; }
+  .choice:active { transform: scale(.98); }
+  .choice .ico { font-size: 34px; }
+  .choice b { display: block; font-size: 16px; }
+  .choice span { color: var(--muted); font-size: 13px; }
+  .choice .lv { margin-left: auto; color: var(--accent); font-weight: 700; font-size: 13px; }
+  .btn { padding: 14px 28px; border-radius: 14px; border: 0; background: var(--accent); color: #1b1b1b; font: 700 17px system-ui; cursor: pointer; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+  <div class="xp"><i id="xp"></i></div>
+  <div class="row"><span id="hp">❤️ 100</span><span id="time">0:00 / 5:00</span><span id="kills">💀 0</span></div>
+</div>
+<div class="overlay" id="start">
+  <div style="font-size:64px">🐱</div>
+  <h1>Коты против пылесосов</h1>
+  <p>Ведите кота пальцем по экрану, он атакует сам. Собирайте кристаллы и выбирайте улучшения. Продержитесь 5 минут.</p>
+  <button class="btn" id="go">Играть</button>
+  <p style="font-size:12px">Прототип для проверки ощущений: без сохранения и сервера.</p>
+</div>
+<div class="overlay hidden" id="level">
+  <h1>Новый уровень!</h1>
+  <div class="choices" id="choices"></div>
+</div>
+<div class="overlay hidden" id="over">
+  <div style="font-size:56px" id="overIco">😿</div>
+  <h1 id="overTitle"></h1>
+  <p id="overText"></p>
+  <button class="btn" id="again">Ещё раз</button>
+</div>
+<script>
+'use strict';
+// ---------- setup ----------
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand(); tg?.disableVerticalSwipes?.();
+const haptic = (k) => { try { tg?.HapticFeedback?.impactOccurred(k); } catch {} };
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+// Emoji are drawn once into small canvases; fillText every frame is slow on phones.
+const sprites = new Map();
+function sprite(e, size) {
+  const key = e + size;
+  let s = sprites.get(key);
+  if (!s) {
+    s = document.createElement('canvas');
+    const px = Math.ceil(size * 1.3 * DPR);
+    s.width = s.height = px;
+    const c = s.getContext('2d');
+    c.font = `${size * DPR}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(e, px / 2, px / 2 + size * 0.08 * DPR);
+    sprites.set(key, s);
+  }
+  return s;
+}
+function draw(e, x, y, size, flip) {
+  const s = sprite(e, size), d = size * 1.3;
+  if (flip) { ctx.save(); ctx.translate(x, y); ctx.scale(-1, 1); ctx.drawImage(s, -d / 2, -d / 2, d, d); ctx.restore(); }
+  else ctx.drawImage(s, x - d / 2, y - d / 2, d, d);
+}
+
+// ---------- input: drag anywhere is a joystick ----------
+const input = { x: 0, y: 0, active: false, ox: 0, oy: 0, cx: 0, cy: 0 };
+const keys = new Set();
+cv.addEventListener('pointerdown', (e) => { input.active = true; input.ox = input.cx = e.clientX; input.oy = input.cy = e.clientY; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', (e) => { if (input.active) { input.cx = e.clientX; input.cy = e.clientY; } });
+const up = () => { input.active = false; };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+function readInput() {
+  let x = 0, y = 0;
+  if (input.active) {
+    const dx = input.cx - input.ox, dy = input.cy - input.oy, d = Math.hypot(dx, dy);
+    if (d > 6) { const k = Math.min(d, 50) / 50; x = dx / d * k; y = dy / d * k; }
+  }
+  if (keys.has('a') || keys.has('arrowleft')) x -= 1;
+  if (keys.has('d') || keys.has('arrowright')) x += 1;
+  if (keys.has('w') || keys.has('arrowup')) y -= 1;
+  if (keys.has('s') || keys.has('arrowdown')) y += 1;
+  const d = Math.hypot(x, y);
+  if (d > 1) { x /= d; y /= d; }
+  input.x = x; input.y = y;
+}
+
+// ---------- content ----------
+const ENEMIES = {
+  mouse:  { e: '🐭', r: 11, hp: 10,  speed: 70, dmg: 5,  xp: 1 },
+  dog:    { e: '🐶', r: 15, hp: 34,  speed: 52, dmg: 10, xp: 3 },
+  vacuum: { e: '🤖', r: 20, hp: 110, speed: 38, dmg: 16, xp: 8 },
+  boss:   { e: '🧹', r: 34, hp: 2600, speed: 46, dmg: 30, xp: 0 },
+};
+
+// Each upgrade has levels; picking one again raises its level.
+const UPGRADES = {
+  fish:   { e: '🐟', name: 'Рыбомёт', max: 6, desc: (l) => l === 0 ? 'Кидает рыбу в ближайшего врага' : `+1 рыба, урон +20%` },
+  yarn:   { e: '🧶', name: 'Клубки', max: 5, desc: (l) => l === 0 ? 'Клубки кружат вокруг кота' : '+1 клубок, быстрее' },
+  meow:   { e: '📣', name: 'Мяу-волна', max: 5, desc: (l) => l === 0 ? 'Волна отбрасывает и ранит всех рядом' : 'Шире и чаще' },
+  laser:  { e: '🔴', name: 'Лазерная указка', max: 5, desc: (l) => l === 0 ? 'Луч прожигает врагов в линию' : 'Толще и сильнее' },
+  speed:  { e: '👟', name: 'Быстрые лапы', max: 5, desc: () => 'Скорость +12%' },
+  heart:  { e: '🍗', name: 'Сытый кот', max: 5, desc: () => 'Здоровье +25 и лечение' },
+  magnet: { e: '🧲', name: 'Магнит', max: 4, desc: () => 'Кристаллы летят издалека' },
+  power:  { e: '💪', name: 'Сила', max: 5, desc: () => 'Весь урон +15%' },
+};
+
+// ---------- state ----------
+let S;
+function newGame() {
+  S = {
+    t: 0, over: false, paused: false, kills: 0, shake: 0,
+    p: { x: 0, y: 0, r: 14, hp: 100, maxHp: 100, speed: 150, face: 1, hurt: 0, inv: 0 },
+    lvl: 1, xp: 0, need: 4, magnet: 70, power: 1,
+    up: { fish: 1 },
+    enemies: [], shots: [], gems: [], fx: [], texts: [],
+    cd: { fish: 0, meow: 1, laser: 1.5 }, spawn: 0, bossSpawned: false, yarnAngle: 0, beams: [],
+  };
+}
+const level = (k) => S.up[k] || 0;
+
+// ---------- spawning ----------
+const MAX_ENEMIES = 260; // more than this crawls on older phones
+function spawnEnemy(kind, elite) {
+  const def = ENEMIES[kind];
+  const a = Math.random() * Math.PI * 2, dist = Math.hypot(W, H) / 2 + 40;
+  const scale = kind === 'boss' ? 1 : 1 + S.t / 150; // enemies get tougher over time
+  S.enemies.push({
+    kind, e: def.e, x: S.p.x + Math.cos(a) * dist, y: S.p.y + Math.sin(a) * dist,
+    r: def.r * (elite ? 1.5 : 1), hp: def.hp * scale * (elite ? 6 : 1), maxHp: def.hp * scale * (elite ? 6 : 1),
+    speed: def.speed, dmg: def.dmg, xp: def.xp * (elite ? 8 : 1), flash: 0, kx: 0, ky: 0, elite,
+  });
+}
+function spawner(dt) {
+  const t = S.t;
+  const rate = 1 + t / 40; // enemies per second
+  S.spawn += dt * rate;
+  while (S.spawn >= 1 && S.enemies.length < MAX_ENEMIES) {
+    S.spawn--;
+    const r = Math.random();
+    spawnEnemy(t > 150 && r < 0.12 ? 'vacuum' : t > 45 && r < 0.35 ? 'dog' : 'mouse');
+  }
+  // An elite every minute, the boss at 4:30.
+  if (Math.floor(t / 60) > Math.floor((t - dt) / 60)) spawnEnemy(t > 120 ? 'vacuum' : 'dog', true);
+  if (t >= 270 && !S.bossSpawned) { S.bossSpawned = true; spawnEnemy('boss'); text(S.p.x, S.p.y - 60, 'БОСС!', '#ff6b6b', 28); haptic('heavy'); }
+}
+
+// ---------- combat ----------
+function hit(en, dmg, kx, ky) {
+  dmg *= S.power;
+  en.hp -= dmg; en.flash = 0.1;
+  en.kx += kx || 0; en.ky += ky || 0;
+  text(en.x, en.y - en.r, Math.round(dmg), '#fff', 13);
+  if (en.hp <= 0 && !en.dead) {
+    en.dead = true; S.kills++;
+    burst(en.x, en.y, en.kind === 'boss' ? 40 : 8, en.kind === 'boss' ? '#ffcf3f' : '#c9d3ea');
+    if (en.xp) S.gems.push({ x: en.x, y: en.y, v: en.xp });
+    if (en.kind === 'boss') { S.shake = 20; haptic('heavy'); setTimeout(() => finish(true), 900); }
+  }
+}
+function nearest(x, y, maxD) {
+  let best = null, bd = maxD * maxD;
+  for (const en of S.enemies) { const d = (en.x - x) ** 2 + (en.y - y) ** 2; if (d < bd && !en.dead) { bd = d; best = en; } }
+  return best;
+}
+function weapons(dt) {
+  const p = S.p;
+  // Fish thrower: nearest enemy, more fish per volley with level.
+  const fl = level('fish');
+  if (fl) {
+    S.cd.fish -= dt;
+    if (S.cd.fish <= 0) {
+      const target = nearest(p.x, p.y, 420);
+      if (target) {
+        S.cd.fish = Math.max(0.25, 0.6 - fl * 0.05);
+        const n = Math.ceil(fl / 2);
+        for (let i = 0; i < n; i++) {
+          const a = Math.atan2(target.y - p.y, target.x - p.x) + (i - (n - 1) / 2) * 0.18;
+          S.shots.push({ x: p.x, y: p.y, vx: Math.cos(a) * 420, vy: Math.sin(a) * 420, life: 1.2, dmg: 12 * (1 + fl * 0.2), r: 9, e: '🐟', pierce: fl >= 5 ? 2 : 0 });
+        }
+      }
+    }
+  }
+  // Yarn balls orbit the cat.
+  const yl = level('yarn');
+  if (yl) {
+    S.yarnAngle += dt * (2.4 + yl * 0.4);
+    const n = 1 + yl, R = 62 + yl * 4;
+    for (let i = 0; i < n; i++) {
+      const a = S.yarnAngle + i * Math.PI * 2 / n;
+      const x = p.x + Math.cos(a) * R, y = p.y + Math.sin(a) * R;
+      for (const en of S.enemies) {
+        if (en.dead || (en.yarnCd || 0) > S.t) continue;
+        if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + 12) ** 2) {
+          en.yarnCd = S.t + 0.45;
+          hit(en, 9 + yl * 3, Math.cos(a) * 60, Math.sin(a) * 60);
+        }
+      }
+    }
+  }
+  // Meow wave: area damage with knockback.
+  const ml = level('meow');
+  if (ml) {
+    S.cd.meow -= dt;
+    if (S.cd.meow <= 0) {
+      S.cd.meow = 3 - ml * 0.3;
+      const R = 90 + ml * 18;
+      S.fx.push({ ring: true, x: p.x, y: p.y, r: 10, max: R, life: 0.35, t: 0 });
+      for (const en of S.enemies) {
+        const dx = en.x - p.x, dy = en.y - p.y, d = Math.hypot(dx, dy);
+        if (d < R + en.r) hit(en, 12 + ml * 6, dx / (d || 1) * 380, dy / (d || 1) * 380);
+      }
+      haptic('light');
+    }
+  }
+  // Laser pointer: a beam toward the densest direction (the nearest enemy).
+  const ll = level('laser');
+  if (ll) {
+    S.cd.laser -= dt;
+    if (S.cd.laser <= 0) {
+      const target = nearest(p.x, p.y, 500);
+      if (target) {
+        S.cd.laser = 2.2 - ll * 0.2;
+        const a = Math.atan2(target.y - p.y, target.x - p.x), len = 520, w = 8 + ll * 3;
+        S.beams.push({ x: p.x, y: p.y, a, len, w, life: 0.25 });
+        const cx = Math.cos(a), cy = Math.sin(a);
+        for (const en of S.enemies) {
+          const dx = en.x - p.x, dy = en.y - p.y, along = dx * cx + dy * cy;
+          if (along < 0 || along > len) continue;
+          if (Math.abs(dx * cy - dy * cx) < w + en.r) hit(en, 20 + ll * 10, cx * 40, cy * 40);
+        }
+      }
+    }
+  }
+}
+
+// ---------- effects ----------
+function burst(x, y, n, color) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 160;
+    S.fx.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.3, t: 0, color, size: 2 + Math.random() * 3 });
+  }
+}
+function text(x, y, s, color, size) {
+  if (S.texts.length > 80) return;
+  S.texts.push({ x: x + (Math.random() - 0.5) * 10, y, s: String(s), color, size, life: 0.6, t: 0 });
+}
+
+// ---------- update ----------
+function update(dt) {
+  S.t += dt;
+  readInput();
+  const p = S.p;
+  p.x += input.x * p.speed * dt; p.y += input.y * p.speed * dt;
+  if (input.x) p.face = input.x > 0 ? 1 : -1;
+  p.inv -= dt; p.hurt -= dt;
+  if (level('heart')) p.hp = Math.min(p.maxHp, p.hp + dt * 0.4 * level('heart'));
+
+  spawner(dt);
+  weapons(dt);
+
+  // Enemies walk to the cat and push each other apart a little.
+  for (const en of S.enemies) {
+    const dx = p.x - en.x, dy = p.y - en.y, d = Math.hypot(dx, dy) || 1;
+    en.x += (dx / d * en.speed + en.kx) * dt; en.y += (dy / d * en.speed + en.ky) * dt;
+    en.kx *= Math.pow(0.02, dt); en.ky *= Math.pow(0.02, dt);
+    en.flash -= dt;
+    if (d < en.r + p.r && p.inv <= 0 && !en.dead) {
+      p.hp -= en.dmg; p.inv = 0.5; p.hurt = 0.2; S.shake = 8; haptic('medium');
+      text(p.x, p.y - 20, '-' + en.dmg, '#ff6b6b', 16);
+      if (p.hp <= 0) finish(false);
+    }
+  }
+  // Cheap separation: compare each enemy with a few neighbours in a grid.
+  const grid = new Map(), cell = 40;
+  for (const en of S.enemies) {
+    const k = (Math.floor(en.x / cell)) + ',' + (Math.floor(en.y / cell));
+    let list = grid.get(k); if (!list) grid.set(k, list = []); list.push(en);
+  }
+  for (const list of grid.values()) {
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.01, min = a.r + b.r;
+      if (d < min) { const push = (min - d) / 2; a.x -= dx / d * push; a.y -= dy / d * push; b.x += dx / d * push; b.y += dy / d * push; }
+    }
+  }
+
+  for (const s of S.shots) {
+    s.x += s.vx * dt; s.y += s.vy * dt; s.life -= dt;
+    for (const en of S.enemies) {
+      if (en.dead || s.life <= 0) continue;
+      if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 < (en.r + s.r) ** 2) {
+        hit(en, s.dmg, s.vx * 0.15, s.vy * 0.15);
+        if (s.pierce-- <= 0) s.life = 0;
+      }
+    }
+  }
+  // Gems fly to the cat inside the magnet radius.
+  for (const g of S.gems) {
+    const dx = p.x - g.x, dy = p.y - g.y, d = Math.hypot(dx, dy);
+    if (d < S.magnet || g.pull) { g.pull = true; const sp = 380; g.x += dx / d * sp * dt; g.y += dy / d * sp * dt; }
+    if (d < p.r + 6) { g.got = true; gainXp(g.v); }
+  }
+  for (const f of S.fx) { f.t += dt; if (!f.ring) { f.x += f.vx * dt; f.y += f.vy * dt; f.vx *= 0.92; f.vy *= 0.92; } }
+  for (const t of S.texts) { t.t += dt; t.y -= 30 * dt; }
+  for (const b of S.beams) b.life -= dt;
+  S.enemies = S.enemies.filter((e) => !e.dead && Math.hypot(e.x - p.x, e.y - p.y) < 1500);
+  S.shots = S.shots.filter((s) => s.life > 0);
+  S.gems = S.gems.filter((g) => !g.got);
+  S.fx = S.fx.filter((f) => f.t < f.life);
+  S.texts = S.texts.filter((t) => t.t < t.life);
+  S.beams = S.beams.filter((b) => b.life > 0);
+  S.shake *= Math.pow(0.001, dt);
+  if (S.t >= 300 && !S.over) finish(true);
+}
+
+function gainXp(v) {
+  S.xp += v;
+  if (S.xp >= S.need) {
+    S.xp -= S.need; S.lvl++; S.need = Math.round(S.need * 1.1 + 2);
+    burst(S.p.x, S.p.y, 18, '#8e7bff'); haptic('heavy');
+    offerUpgrades();
+  }
+}
+
+// ---------- level-up choice ----------
+function offerUpgrades() {
+  const pool = Object.keys(UPGRADES).filter((k) => level(k) < UPGRADES[k].max);
+  const pick = [];
+  while (pick.length < 3 && pool.length) pick.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  if (!pick.length) return;
+  S.paused = true;
+  const box = document.getElementById('choices');
+  box.replaceChildren(...pick.map((k) => {
+    const u = UPGRADES[k], l = level(k);
+    const b = document.createElement('button');
+    b.className = 'choice';
+    b.innerHTML = `<span class="ico">${u.e}</span><div><b>${u.name}</b><span>${u.desc(l)}</span></div><span class="lv">${l ? 'ур. ' + (l + 1) : 'новое'}</span>`;
+    b.onclick = () => { apply(k); document.getElementById('level').classList.add('hidden'); S.paused = false; last = performance.now(); };
+    return b;
+  }));
+  document.getElementById('level').classList.remove('hidden');
+}
+function apply(k) {
+  S.up[k] = level(k) + 1;
+  const p = S.p;
+  if (k === 'speed') p.speed *= 1.12;
+  if (k === 'heart') { p.maxHp += 25; p.hp = Math.min(p.maxHp, p.hp + 40); }
+  if (k === 'magnet') S.magnet += 60;
+  if (k === 'power') S.power *= 1.15;
+}
+
+// ---------- render ----------
+function render() {
+  const p = S.p;
+  const sx = (Math.random() - 0.5) * S.shake, sy = (Math.random() - 0.5) * S.shake;
+  const ox = W / 2 - p.x + sx, oy = H / 2 - p.y + sy;
+  ctx.fillStyle = '#2b3348'; ctx.fillRect(0, 0, W, H);
+  // Floor tiles.
+  const tile = 64;
+  ctx.fillStyle = '#313a52';
+  const x0 = Math.floor((p.x - W / 2) / tile) - 1, y0 = Math.floor((p.y - H / 2) / tile) - 1;
+  for (let i = x0; i < x0 + W / tile + 3; i++) for (let j = y0; j < y0 + H / tile + 3; j++) if ((i + j) % 2 === 0) ctx.fillRect(i * tile + ox, j * tile + oy, tile, tile);
+
+  ctx.save(); ctx.translate(ox, oy);
+  for (const g of S.gems) {
+    ctx.fillStyle = g.v >= 8 ? '#ffcf3f' : g.v >= 3 ? '#8e7bff' : '#5ad1ff';
+    ctx.beginPath(); ctx.moveTo(g.x, g.y - 6); ctx.lineTo(g.x + 5, g.y); ctx.lineTo(g.x, g.y + 6); ctx.lineTo(g.x - 5, g.y); ctx.fill();
+  }
+  for (const b of S.beams) {
+    ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.a);
+    ctx.globalAlpha = Math.max(0, b.life / 0.25);
+    ctx.fillStyle = '#ff3b3b'; ctx.fillRect(0, -b.w / 2, b.len, b.w);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, -b.w / 6, b.len, b.w / 3);
+    ctx.restore();
+  }
+  for (const en of S.enemies) {
+    if (en.elite || en.kind === 'boss') { ctx.fillStyle = 'rgba(255,80,80,.25)'; ctx.beginPath(); ctx.arc(en.x, en.y, en.r + 6, 0, 7); ctx.fill(); }
+    draw(en.e, en.x, en.y, en.r * 2, en.x < p.x);
+    if (en.flash > 0) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.6; draw(en.e, en.x, en.y, en.r * 2, en.x < p.x); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
+    if (en.hp < en.maxHp && (en.elite || en.kind !== 'mouse')) {
+      ctx.fillStyle = '#0008'; ctx.fillRect(en.x - en.r, en.y - en.r - 8, en.r * 2, 4);
+      ctx.fillStyle = '#ff6b6b'; ctx.fillRect(en.x - en.r, en.y - en.r - 8, en.r * 2 * Math.max(0, en.hp / en.maxHp), 4);
+    }
+  }
+  for (const s of S.shots) { ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(Math.atan2(s.vy, s.vx) + Math.PI); draw(s.e, 0, 0, 18); ctx.restore(); }
+  const yl = level('yarn');
+  if (yl) {
+    const n = 1 + yl, R = 62 + yl * 4;
+    for (let i = 0; i < n; i++) { const a = S.yarnAngle + i * Math.PI * 2 / n; draw('🧶', p.x + Math.cos(a) * R, p.y + Math.sin(a) * R, 20); }
+  }
+  // The cat blinks while invulnerable.
+  if (p.inv <= 0 || Math.floor(S.t * 20) % 2) draw('🐱', p.x, p.y + Math.sin(S.t * 14) * (input.x || input.y ? 2 : 0), 30, p.face < 0);
+  for (const f of S.fx) {
+    const k = f.t / f.life;
+    if (f.ring) { ctx.strokeStyle = `rgba(255,207,63,${1 - k})`; ctx.lineWidth = 6 * (1 - k) + 1; ctx.beginPath(); ctx.arc(f.x, f.y, f.r + (f.max - f.r) * k, 0, 7); ctx.stroke(); }
+    else { ctx.globalAlpha = 1 - k; ctx.fillStyle = f.color; ctx.fillRect(f.x - f.size / 2, f.y - f.size / 2, f.size, f.size); ctx.globalAlpha = 1; }
+  }
+  ctx.textAlign = 'center';
+  for (const t of S.texts) {
+    ctx.globalAlpha = 1 - t.t / t.life; ctx.font = `800 ${t.size}px system-ui`;
+    ctx.lineWidth = 3; ctx.strokeStyle = '#000a'; ctx.strokeText(t.s, t.x, t.y); ctx.fillStyle = t.color; ctx.fillText(t.s, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  if (p.hurt > 0) { ctx.fillStyle = `rgba(255,0,0,${p.hurt})`; ctx.fillRect(0, 0, W, H); }
+  // Joystick hint where the finger went down.
+  if (input.active) {
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(input.ox, input.oy, 50, 0, 7); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
+    ctx.beginPath(); ctx.arc(input.ox + input.x * 50, input.oy + input.y * 50, 20, 0, 7); ctx.fill();
+  }
+
+  document.getElementById('hp').textContent = `❤️ ${Math.max(0, Math.ceil(p.hp))}`;
+  const left = Math.floor(S.t);
+  document.getElementById('time').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} / 5:00 · ур. ${S.lvl}`;
+  document.getElementById('kills').textContent = `💀 ${S.kills}`;
+  document.getElementById('xp').style.width = `${100 * S.xp / S.need}%`;
+}
+
+// ---------- loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (S && !S.over && !S.paused) update(dt);
+  if (S) render();
+  requestAnimationFrame(frame);
+}
+function finish(won) {
+  if (S.over) return;
+  S.over = true;
+  const ups = Object.entries(S.up).map(([k, l]) => `${UPGRADES[k].e}${l}`).join(' ');
+  document.getElementById('overIco').textContent = won ? '😻' : '😿';
+  document.getElementById('overTitle').textContent = won ? 'Кот выстоял!' : 'Кота засосало';
+  document.getElementById('overText').textContent = `${Math.floor(S.t / 60)}:${String(Math.floor(S.t % 60)).padStart(2, '0')} · ${S.kills} врагов · уровень ${S.lvl}\n${ups}`;
+  document.getElementById('over').classList.remove('hidden');
+  haptic(won ? 'heavy' : 'rigid');
+}
+function start() {
+  newGame();
+  for (const id of ['start', 'over', 'level']) document.getElementById(id).classList.add('hidden');
+  last = performance.now();
+}
+document.getElementById('go').onclick = start;
+document.getElementById('again').onclick = start;
+newGame(); S.paused = true;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
