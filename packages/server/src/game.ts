@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { cats, DAILY_TASKS, frameById, hashSeed, SEASON_PASS, SEASON_POINTS_PER_LEVEL } from '@otryad/core';
+import { replayHere, type Replayer } from './replay.ts';
 import { DailyTakenError, ghostOf, type Duel, type Ghost, type LeagueEntry, type DuelInboxItem, type RunMode, type RunOutcome, type RunRecord, type Store, type StoredRun } from './store.ts';
 
 const { TICK_RATE } = cats;
@@ -127,11 +128,13 @@ export class Game {
   private store: Store;
   private notifier: Notifier | null;
   private now: () => number;
+  private replay: Replayer;
 
-  constructor(store: Store, notifier: Notifier | null = null, now: () => number = Date.now) {
+  constructor(store: Store, notifier: Notifier | null = null, now: () => number = Date.now, replay: Replayer = replayHere) {
     this.store = store;
     this.notifier = notifier;
     this.now = now;
+    this.replay = replay;
   }
 
   // Analytics must never break the game.
@@ -203,7 +206,7 @@ export class Game {
     let ticks: number;
     try {
       ticks = cats.decodeMoves(rec.moves).length;
-      if (!/^[0-9]*$/.test(rec.picks) || rec.picks.length > 200) throw new Error('bad picks');
+      if (!/^[0-9r]*$/.test(rec.picks) || rec.picks.length > 400) throw new Error('bad picks');
     } catch {
       throw new GameError(400, 'Неверная запись забега');
     }
@@ -228,13 +231,12 @@ export class Game {
   }
 
   private async settle(run: StoredRun, playerName: string, rec: RunRecord): Promise<FinishResult | null> {
-    let sim;
+    let r;
     try {
-      sim = cats.replay(run.seed, rec);
+      r = await this.replay(run.seed, rec);
     } catch {
       throw new GameError(400, 'Неверная запись забега');
     }
-    const r = sim.result();
     const result: RunOutcome = { won: r.won, ticks: r.ticks, kills: r.kills, level: r.level, points: cats.runPoints(r.ticks, r.won) };
     if (!(await this.store.finishRun(run.id, result, rec))) return null;
 

@@ -4,12 +4,13 @@ import { flashSprite, sprite, type SpriteId } from './sprites.ts';
 const { CatRun, DT, Recorder, decodeMoves, dirFromVector, resume } = cats;
 type CatRun = InstanceType<typeof cats.CatRun>;
 type SimEvent = cats.SimEvent;
-type UpgradeId = cats.UpgradeId;
+type CardId = cats.CardId;
 export type RunRecord = cats.RunRecord;
 
 export interface GameHooks {
-  // An upgrade choice is pending; call `choose` with the card index.
-  onLevelUp(cards: UpgradeId[], levels: number[], choose: (i: number) => void): void;
+  // A card choice is pending; call `choose` with the card index, or
+  // `reroll` (null when none is left) to be offered new cards.
+  onLevelUp(cards: CardId[], levels: number[], choose: (i: number) => void, reroll: (() => void) | null): void;
   onEnd(run: CatRun, record: RunRecord): void;
   onHud(run: CatRun, ghost: CatRun | null): void;
   onEvent?(e: SimEvent): void;
@@ -46,13 +47,18 @@ interface Ring {
   r: number;
   t: number;
 }
-interface Beam {
+interface Slash {
   x: number;
   y: number;
-  dx: number;
-  dy: number;
-  len: number;
   w: number;
+  h: number;
+  face: 1 | -1;
+  t: number;
+}
+interface Spark {
+  x: number;
+  y: number;
+  r: number;
   t: number;
 }
 
@@ -71,12 +77,18 @@ class Ghost {
   step(): void {
     const r = this.run;
     if (r.over) return;
-    while (r.pending) r.choose(Number(this.picks[this.pick++] ?? 0));
+    while (r.pending) {
+      const c = this.picks[this.pick++];
+      if (c === 'r') r.reroll();
+      else r.choose(Number(c ?? 0));
+    }
     r.step(this.dirs[this.i++] ?? 0);
   }
 }
 
-const ENEMY_SPRITE: Record<string, SpriteId> = { mouse: 'mouse', dog: 'dog', vacuum: 'vacuum', boss: 'boss' };
+const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = { mouse: 'mouse', dust: 'dust', robot: 'vacuum', bigrobot: 'vacuum', mop: 'boss' };
+const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟' };
+const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟' };
 const VIEW_RADIUS = 470; // world units from the cat to the nearest screen edge, at most
 
 export class Game {
@@ -106,7 +118,8 @@ export class Game {
   private particles: Particle[] = [];
   private texts: FloatText[] = [];
   private rings: Ring[] = [];
-  private beams: Beam[] = [];
+  private slashes: Slash[] = [];
+  private sparks: Spark[] = [];
   private shake = 0;
   private hurt = 0;
   private floor: CanvasPattern | null = null;
@@ -245,6 +258,7 @@ export class Game {
     for (const e of run.enemies) this.prev.set(e.id, [e.x, e.y]);
     for (const s of run.shots) this.prev.set(s.id, [s.x, s.y]);
     for (const g of run.gems) this.prev.set(g.id, [g.x, g.y]);
+    for (const z of run.zones) this.prev.set(z.id, [z.x, z.y]);
     this.prevPlayer = [run.player.x, run.player.y];
     const [x, y] = this.stickVector();
     this.rec.step(dirFromVector(x, y, 0.3));
@@ -273,7 +287,7 @@ export class Game {
     const cards = run.pending!.slice();
     this.hooks.onLevelUp(
       cards,
-      cards.map((k) => run.lvl(k)),
+      cards.map((k) => (k === 'snack' || k === 'fishes' ? 0 : run.lvl(k))),
       (i) => {
         this.rec.choose(i);
         if (run.pending) this.offer();
@@ -283,6 +297,12 @@ export class Game {
           this.acc = 0;
         }
       },
+      run.rerolls > 0
+        ? () => {
+            this.rec.reroll();
+            this.offer();
+          }
+        : null,
     );
   }
 
@@ -294,8 +314,11 @@ export class Game {
         this.text(e.x, e.y, String(Math.round(e.dmg)), '#ffffff', 13);
         break;
       case 'kill':
-        this.burst(e.x, e.y, e.kind === 'boss' ? 40 : e.elite ? 18 : 6, e.kind === 'boss' ? '#ffcf3f' : '#d8dcef');
-        if (e.kind === 'boss') this.shake = 22;
+        this.burst(e.x, e.y, e.kind === 'mop' ? 40 : e.elite ? 18 : 6, e.kind === 'mop' ? '#ffcf3f' : '#d8dcef');
+        if (e.kind === 'mop') {
+          this.shake = 22;
+          this.text(e.x, e.y - 50, 'Швабра сломана!', '#ffcf3f', 24);
+        }
         break;
       case 'hurt':
         this.hurt = 0.25;
@@ -306,14 +329,24 @@ export class Game {
         this.burst(this.run.player.x, this.run.player.y, 18, '#8e7bff');
         break;
       case 'boss':
-        this.text(this.run.player.x, this.run.player.y - 70, 'БОСС!', '#ff6b6b', 30);
+        this.text(this.run.player.x, this.run.player.y - 70, 'Идёт Швабра!', '#ff6b6b', 30);
         this.shake = 12;
+        break;
+      case 'elite':
+        this.text(this.run.player.x, this.run.player.y - 70, 'Большой робот!', '#ff9f43', 24);
+        break;
+      case 'pickup':
+        this.text(this.run.player.x, this.run.player.y - 40, PICKUP_TEXT[e.kind], '#ffe08a', 18);
+        if (e.kind === 'alarm') this.shake = 14;
+        break;
+      case 'slash':
+        this.slashes.push({ ...e, t: 0 });
+        break;
+      case 'spark':
+        this.sparks.push({ ...e, t: 0 });
         break;
       case 'wave':
         this.rings.push({ x: e.x, y: e.y, r: e.r, t: 0 });
-        break;
-      case 'beam':
-        this.beams.push({ ...e, t: 0 });
         break;
     }
   }
@@ -346,11 +379,13 @@ export class Game {
       t.y -= 32 * dt;
     }
     for (const r of this.rings) r.t += dt;
-    for (const b of this.beams) b.t += dt;
+    for (const b of this.slashes) b.t += dt;
+    for (const b of this.sparks) b.t += dt;
     this.particles = this.particles.filter((p) => p.t < p.life);
     this.texts = this.texts.filter((t) => t.t < 0.6);
     this.rings = this.rings.filter((r) => r.t < 0.35);
-    this.beams = this.beams.filter((b) => b.t < 0.25);
+    this.slashes = this.slashes.filter((b) => b.t < 0.18);
+    this.sparks = this.sparks.filter((b) => b.t < 0.3);
     this.shake *= Math.pow(0.002, dt);
     this.hurt = Math.max(0, this.hurt - dt);
   }
@@ -421,19 +456,22 @@ export class Game {
       c.stroke();
     }
 
-    // Laser beams under the creatures.
-    for (const b of this.beams) {
-      const k = 1 - b.t / 0.25;
-      c.save();
-      c.translate(b.x, b.y);
-      c.rotate(Math.atan2(b.dy, b.dx));
-      c.globalAlpha = k;
-      c.fillStyle = '#ff3b4e';
-      c.fillRect(0, -b.w / 2, b.len, b.w);
-      c.fillStyle = '#fff';
-      c.fillRect(0, -b.w / 6, b.len, b.w / 3);
-      c.restore();
+    // Puddles from the glass, under everything.
+    for (const zn of run.zones) {
+      c.globalAlpha = Math.min(1, zn.life / 15) * 0.55;
+      c.fillStyle = '#5fb7f0';
+      c.beginPath();
+      c.ellipse(zn.x, zn.y, zn.r, zn.r * 0.7, 0, 0, Math.PI * 2);
+      c.fill();
     }
+    c.globalAlpha = 1;
+
+    // Things on the floor.
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.font = '22px system-ui, sans-serif';
+    for (const it of run.pickups) c.fillText(PICKUP_ICON[it.kind], it.x, it.y + Math.sin(t * 4 + it.id) * 2);
+    c.textBaseline = 'alphabetic';
 
     // Shadows first, then bodies, so crowds read clearly.
     c.fillStyle = 'rgba(60, 40, 20, .18)';
@@ -446,16 +484,18 @@ export class Game {
     c.fill();
     for (const e of run.enemies) {
       const [x, y] = this.lerp(e.id, e.x, e.y, a);
-      if (e.elite || e.kind === 'boss') {
+      if (e.elite) {
         c.fillStyle = 'rgba(255, 70, 90, .22)';
         c.beginPath();
         c.arc(x, y, e.r + 8, 0, Math.PI * 2);
         c.fill();
       }
-      const wob = e.kind === 'vacuum' ? 0 : Math.sin(t * 12 + e.id) * 1.5;
+      const wob = run.freeze > 0 || e.kind === 'robot' || e.kind === 'bigrobot' ? 0 : Math.sin(t * 12 + e.id) * 1.5;
       const size = e.r * 2.3;
-      this.blit(ENEMY_SPRITE[e.kind], x, y + wob, size, x > px, run.tick - e.hitTick < 3);
-      if (e.hp < e.maxHp && (e.elite || e.kind === 'boss' || e.kind === 'vacuum')) {
+      // Charging robots face where they drive.
+      const flip = e.kind === 'robot' ? e.vx > 0 : x > px;
+      this.blit(ENEMY_SPRITE[e.kind], x, y + wob, size, flip, run.tick - e.hitTick < 3);
+      if (e.hp < e.maxHp && (e.elite || e.kind === 'robot')) {
         const w = e.r * 2;
         c.fillStyle = 'rgba(0,0,0,.45)';
         c.fillRect(x - w / 2, y - e.r - 10, w, 5);
@@ -464,26 +504,86 @@ export class Game {
       }
     }
 
-    // Fish in flight point where they fly.
-    for (const s of run.shots) {
-      const [x, y] = this.lerp(s.id, s.x, s.y, a);
-      c.save();
-      c.translate(x, y);
-      c.rotate(Math.atan2(s.vy, s.vx) + Math.PI);
-      this.blit('fish', 0, 0, 24);
-      c.restore();
+    // Unplugged vacuums go blue.
+    if (run.freeze > 0) {
+      c.fillStyle = 'rgba(120, 180, 255, .25)';
+      c.fillRect(px - (this.W / 2) * z, py - (this.H / 2) * z, this.W * z, this.H * z);
     }
 
-    // Yarn balls orbit the cat.
-    const yl = run.lvl('yarn');
-    if (yl) {
-      const n = 1 + yl;
-      const R = 62 + yl * 4;
-      for (let i = 0; i < n; i++) {
-        const ang = run.yarnAngle + (i * Math.PI * 2) / n;
-        this.blit('yarn', px + Math.cos(ang) * R, py + Math.sin(ang) * R, 24);
+    // Shots: laser dots, fish pointing where they fly, spinning pots.
+    for (const s of run.shots) {
+      const [x, y] = this.lerp(s.id, s.x, s.y, a);
+      if (s.kind === 'laser') {
+        c.fillStyle = '#ff2d45';
+        c.beginPath();
+        c.arc(x, y, s.r, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = '#fff';
+        c.beginPath();
+        c.arc(x, y, s.r * 0.4, 0, Math.PI * 2);
+        c.fill();
+      } else if (s.kind === 'fish') {
+        c.save();
+        c.translate(x, y);
+        c.rotate(Math.atan2(s.vy, s.vx) + Math.PI);
+        this.blit('fish', 0, 0, 24);
+        c.restore();
+      } else {
+        c.save();
+        c.translate(x, y);
+        c.rotate(t * 10 + s.id);
+        c.font = `${Math.round(s.r * 2)}px system-ui, sans-serif`;
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText('🪴', 0, 0);
+        c.restore();
+        c.textBaseline = 'alphabetic';
       }
     }
+
+    // Yarn balls orbit the cat while they spin.
+    if (run.lvl('yarn') && run.yarnLeft > 0) {
+      const w = run.weaponStats('yarn');
+      const R = 72 * w.area;
+      for (let i = 0; i < w.amount; i++) {
+        const ang = run.yarnAngle + (i * Math.PI * 2) / w.amount;
+        this.blit('yarn', px + Math.cos(ang) * R, py + Math.sin(ang) * R, 24 * w.area);
+      }
+    }
+
+    // Claw slashes: three scratches across the hit box.
+    for (const sl of this.slashes) {
+      const k = sl.t / 0.18;
+      c.globalAlpha = 1 - k;
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = 4;
+      for (let i = -1; i <= 1; i++) {
+        c.beginPath();
+        c.moveTo(sl.x - (sl.face * sl.w) / 2, sl.y + i * sl.h * 0.3 - sl.h * 0.2);
+        c.lineTo(sl.x - (sl.face * sl.w) / 2 + sl.face * sl.w * Math.min(1, k * 3), sl.y + i * sl.h * 0.3 + sl.h * 0.2);
+        c.stroke();
+      }
+    }
+    c.globalAlpha = 1;
+
+    // Static sparks: a bolt from above and a flash.
+    for (const sp of this.sparks) {
+      const k = sp.t / 0.3;
+      c.globalAlpha = 1 - k;
+      c.strokeStyle = '#fff36b';
+      c.lineWidth = 3;
+      c.beginPath();
+      c.moveTo(sp.x + 10, sp.y - 120);
+      c.lineTo(sp.x - 8, sp.y - 70);
+      c.lineTo(sp.x + 6, sp.y - 40);
+      c.lineTo(sp.x, sp.y);
+      c.stroke();
+      c.fillStyle = 'rgba(255, 243, 107, .35)';
+      c.beginPath();
+      c.arc(sp.x, sp.y, sp.r * (0.6 + k * 0.4), 0, Math.PI * 2);
+      c.fill();
+    }
+    c.globalAlpha = 1;
 
     // Meow waves.
     for (const r of this.rings) {

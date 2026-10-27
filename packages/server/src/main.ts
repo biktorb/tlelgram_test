@@ -1,6 +1,7 @@
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { PgStore } from './pgStore.ts';
+import { workerReplayer } from './replay.ts';
 import { MemoryStore, type Store } from './store.ts';
 
 const config = loadConfig();
@@ -16,11 +17,13 @@ if (config.databaseUrl) {
   store = new MemoryStore();
 }
 
-const app = await buildApp(config, store, { logger: true });
+const replay = workerReplayer();
+const app = await buildApp(config, store, { logger: true, replay });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {
     await app.close();
+    await replay.close();
     await store.close();
     process.exit(0);
   });

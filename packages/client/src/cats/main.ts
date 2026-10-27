@@ -5,8 +5,9 @@ import { Game, type RunRecord } from './game.ts';
 import { loadSprites, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
-const { RUN_SECONDS, TICK_RATE, UPGRADES } = cats;
-type UpgradeId = cats.UpgradeId;
+const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
+type CardId = cats.CardId;
+type ItemId = cats.ItemId;
 type CatRun = InstanceType<typeof cats.CatRun>;
 
 initTelegram();
@@ -61,18 +62,30 @@ function button(text: string, cls: string, onClick: () => void): HTMLButtonEleme
   return b;
 }
 
-const ICONS: Record<UpgradeId, SpriteId | string> = {
+const ICONS: Record<CardId, SpriteId | string> = {
+  claws: '🐾',
+  laser: '🔴',
   fish: 'fish',
   yarn: 'yarn',
   meow: '📣',
-  laser: '🔴',
-  speed: '👟',
-  heart: '🍗',
-  magnet: '🧲',
-  power: '💪',
+  glass: '🥛',
+  pot: '🪴',
+  spark: '⚡',
+  belly: '🍗',
+  box: '📦',
+  paws: '🧤',
+  patience: '⏳',
+  purr: '💤',
+  catnip: '🌿',
+  bigpaws: '🦶',
+  pack: '🐈',
+  food: '🥫',
+  blackcat: '🐈‍⬛',
+  snack: '🥪',
+  fishes: '🐟',
 };
 
-function icon(id: UpgradeId, px = 40): HTMLElement {
+function icon(id: CardId, px = 40): HTMLElement {
   const v = ICONS[id];
   if (v === 'fish' || v === 'yarn') {
     const img = sprite(v, px * 2);
@@ -240,7 +253,8 @@ function hud(ghostName?: string): HTMLElement {
       <div class="bar hp"><i></i><b></b></div>
       <div class="bar xp"><i></i><b></b></div>
     </div>
-    <div class="stats"><span class="time"></span><span class="ghostline"></span><span class="kills"></span></div>`;
+    <div class="stats"><span class="time"></span><span class="ghostline"></span><span class="kills"></span></div>
+    <div class="slots"></div>`;
   if (ghostName) top.dataset.ghost = ghostName;
   top.append(button('❚❚', 'pause', () => pauseMenu()));
   return top;
@@ -257,23 +271,41 @@ function updateHud(run: CatRun, ghost: CatRun | null): void {
   el.querySelector('.time')!.textContent = `${mmss(run.tick)} / ${mmss(RUN_SECONDS * TICK_RATE)}`;
   el.querySelector('.kills')!.textContent = `💀 ${run.kills}`;
   const who = el.dataset.ghost ?? 'призрак';
+  // Owned weapons and passives with levels, redrawn only when they change.
+  const slots = el.querySelector<HTMLElement>('.slots')!;
+  const sig = JSON.stringify(run.items);
+  if (slots.dataset.sig !== sig) {
+    slots.dataset.sig = sig;
+    const row = (ids: ItemId[]) => {
+      const r = h('div', 'row');
+      for (const k of ids) {
+        const u = h('span', 'slot');
+        u.append(icon(k, 18), h('b', '', String(run.lvl(k))));
+        r.append(u);
+      }
+      return r;
+    };
+    slots.replaceChildren(row(run.weapons()), row(run.passives()));
+  }
   el.querySelector('.ghostline')!.textContent = ghost ? (ghost.over ? `👻 ${who}: ${ghost.won ? 'выстоял' : mmss(ghost.tick)}` : `👻 ${who} жив`) : '';
 }
 
-function levelUp(cards: UpgradeId[], levels: number[], choose: (i: number) => void): void {
+function levelUp(cards: CardId[], levels: number[], choose: (i: number) => void, reroll: (() => void) | null): void {
+  ui.querySelector('.overlay.level')?.remove();
   const list = h('div', 'cards');
   cards.forEach((k, i) => {
-    const u = UPGRADES[k];
     const b = button('', 'card', () => {
       box.remove();
       choose(i);
     });
     const text = h('div', 'text');
-    text.append(h('b', '', u.name), h('span', '', u.desc(levels[i])));
-    b.append(icon(k), text, h('span', 'lv', levels[i] ? `ур. ${levels[i] + 1}` : 'новое'));
+    text.append(h('b', '', cardName(k)), h('span', '', cardText(k, levels[i])));
+    const kind = isWeapon(k) ? 'оружие' : k === 'snack' || k === 'fishes' ? '' : 'пассивка';
+    b.append(icon(k), text, h('span', 'lv', kind && levels[i] ? `ур. ${levels[i] + 1}` : kind ? `новое ${kind}` : ''));
     list.append(b);
   });
   const box = overlay(h('h1', '', 'Новый уровень!'), list);
+  if (reroll) box.append(button('🎲 Другие карточки (1 раз)', 'btn secondary reroll', () => reroll()));
   box.classList.add('level');
   ui.append(box);
 }
@@ -323,7 +355,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     vs = run.tick > ghostTicks || (run.won && !ghost.won) ? 'Ты пережил призрака!' : run.won && ghost.won ? 'Оба выстояли' : 'Призрак продержался дольше';
   }
   const ups = h('div', 'ups');
-  for (const [k, l] of Object.entries(run.up) as [UpgradeId, number][]) {
+  for (const [k, l] of Object.entries(run.items) as [ItemId, number][]) {
     const u = h('span', 'up');
     u.append(icon(k, 26), h('b', '', String(l)));
     ups.append(u);
