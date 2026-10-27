@@ -25,3 +25,7 @@ npm run balance   # симуляция баланса, по умолчанию 3
 npm run dev       # прототип на http://localhost:5173
 npm run build     # сборка прототипа в packages/client/dist
 ```
+
+## Графика
+
+Кот, пёс и мышь в «Котах против пылесосов» взяты из набора [«Animals pack»](https://opengameart.org/content/animals-pack) Ольги Бикмуллиной (Olga Bikmullina), лицензия [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/). Из исходного SVG вырезаны три головы: `packages/client/public/sprites/`. Пылесос, швабра, рыба и клубок нарисованы в коде в том же стиле (`packages/client/src/cats/sprites.ts`).

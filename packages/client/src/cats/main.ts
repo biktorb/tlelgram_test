@@ -1,7 +1,7 @@
 import { cats } from '@otryad/core';
 import { haptic, initTelegram, setBack } from '../telegram.ts';
 import { Game, type RunRecord } from './game.ts';
-import { sprite, type SpriteId } from './sprites.ts';
+import { loadSprites, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
 const { RUN_SECONDS, TICK_RATE, UPGRADES } = cats;
@@ -113,6 +113,11 @@ function menu(): void {
     buttons.append(button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => start(last.seed, last.record)));
   }
   box.append(buttons);
+  const credit = h('a', 'credit', 'Кот, пёс и мышь: Olga Bikmullina, CC-BY 3.0');
+  credit.href = 'https://opengameart.org/content/animals-pack';
+  credit.target = '_blank';
+  credit.rel = 'noopener';
+  box.append(credit);
   ui.replaceChildren(box);
 }
 
@@ -238,4 +243,4 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseMenu();
 });
 
-menu();
+void loadSprites().then(menu);

@@ -496,11 +496,15 @@ export class Game {
     // The cat blinks while invulnerable and bobs while walking.
     const moving = this.stick.on || this.keys.size > 0;
     if (p.inv <= 0 || Math.floor(run.tick / 2) % 2) {
-      c.fillStyle = 'rgba(60, 40, 20, .2)';
+      // An orange ring under the cat so it stands out from the crowd.
+      c.fillStyle = 'rgba(255, 138, 61, .35)';
+      c.strokeStyle = 'rgba(255, 138, 61, .9)';
+      c.lineWidth = 2.5;
       c.beginPath();
-      c.ellipse(px, py + 14, 14, 5, 0, 0, Math.PI * 2);
+      c.ellipse(px, py + 16, 22, 8, 0, 0, Math.PI * 2);
       c.fill();
-      this.blit('cat', px, py + (moving ? Math.sin(t * 16) * 2 : 0), 38, p.face < 0);
+      c.stroke();
+      this.blit('cat', px, py + (moving ? Math.sin(t * 16) * 2 : 0), 46, p.face < 0);
     }
 
     // Particles and floating numbers on top.
