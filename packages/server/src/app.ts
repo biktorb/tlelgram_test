@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import { cats } from '@otryad/core';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -8,7 +9,7 @@ import { verifyInitData, type AuthResult } from './auth.ts';
 import { Game, GameError, parseRecord, type Notifier } from './game.ts';
 import { TelegramNotifier } from './notify.ts';
 import { CLIENT_EVENTS, computeStats } from './stats.ts';
-import type { Replayer } from './replay.ts';
+import { analyzeHere, type Analyzer, type Replayer } from './replay.ts';
 import type { Store } from './store.ts';
 
 declare module 'fastify' {
@@ -20,7 +21,7 @@ declare module 'fastify' {
 export async function buildApp(
   config: Config,
   store: Store,
-  opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number; replay?: Replayer } = {},
+  opts: { logger?: boolean; notifier?: Notifier | null; now?: () => number; replay?: Replayer; analyze?: Analyzer } = {},
 ): Promise<FastifyInstance> {
   // A 20-minute run record is a few tens of kilobytes.
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 256 * 1024, trustProxy: true });
@@ -110,16 +111,44 @@ export async function buildApp(
 
   // Closed-test metrics for the owner; the key comes in the x-admin-key header
   // (the /admin.html page sends it) or as ?key= for a quick look.
-  app.get<{ Querystring: { key?: string; days?: string } }>('/api/admin/stats', async (req) => {
+  const admin = (req: { headers: Record<string, unknown>; query: { key?: string } }) => {
     const header = req.headers['x-admin-key'];
     const key = Buffer.from((typeof header === 'string' ? header : req.query.key) ?? '');
     const want = Buffer.from(config.adminKey ?? '');
     if (!config.adminKey || key.length !== want.length || !timingSafeEqual(key, want)) throw new GameError(404, 'Not found');
+  };
+  app.get<{ Querystring: { key?: string; days?: string } }>('/api/admin/stats', async (req) => {
+    admin(req);
     const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 60);
     const now = (opts.now ?? Date.now)();
     // Retention needs players' first days, so look a week further back than the table.
     const events = await store.eventsSince(new Date(now - (days + 7) * 24 * 3600 * 1000));
     return computeStats(events, now, days);
+  });
+
+  // How the latest finished runs went, replayed from their records: deaths,
+  // damage by enemy, minutes and picks. Finished runs never change, so their
+  // analyses are kept.
+  const analyze = opts.analyze ?? analyzeHere;
+  const insights = new Map<string, Promise<cats.RunInsight | null>>();
+  app.get<{ Querystring: { key?: string; limit?: string } }>('/api/admin/runs', async (req) => {
+    admin(req);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const runs = await store.recentRuns(limit);
+    const list = await Promise.all(
+      runs.map(async (r) => {
+        let a = insights.get(r.id);
+        if (!a) {
+          a = r.record ? analyze(r.seed, r.record).catch(() => null) : Promise.resolve(null);
+          insights.set(r.id, a);
+          if (insights.size > 1000) insights.delete(insights.keys().next().value!);
+        }
+        const insight = await a;
+        return { id: r.id, name: r.name, mode: r.mode, finishedAt: new Date(r.finishedAt).toISOString(), insight };
+      }),
+    );
+    const ok = list.flatMap((r) => (r.insight ? [r.insight] : []));
+    return { summary: cats.summarize(ok), runs: list };
   });
 
   // Fish, auras and today's tasks; finished tasks are paid here.

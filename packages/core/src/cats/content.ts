@@ -19,10 +19,10 @@ export interface EnemyDef {
 // bats (weak, the fastest chasers), dust is zombies and skeletons, robots
 // are mudmen that charge, the big robot is the Mantichana-type elite.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
-  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 110, dmg: 4, xp: 1, move: 'chase' },
-  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 80, dmg: 7, xp: 1.5, move: 'chase' },
-  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 145, dmg: 7, xp: 2.5, move: 'charge' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 85, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
+  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
+  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 65, dmg: 7, xp: 1.5, move: 'chase' },
+  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 125, dmg: 7, xp: 2.5, move: 'charge' },
+  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 75, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
   // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
   cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 230, dmg: 99999, xp: 0, move: 'chase' },
   mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },

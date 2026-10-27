@@ -52,11 +52,16 @@ const SCREEN_X = 360;
 const SCREEN_Y = 460;
 
 // Difficulty knobs, tuned with `npm run balance:cats`.
+// Enemies hurt the cat only when they overlap it this deep, like the small
+// hitboxes of VS: a mouse that just brushes the cat while it turns misses.
+const CONTACT = 0.8;
+
 export const BALANCE = {
   hpPerMin: 0.15, // enemy health grows by this share every minute
   hpPerMin2: 0.11, // and by this share every minute squared, to keep up with upgrades
   crowdScale: 1.3, // multiplies the fewest enemies of every minute (CROWD)
   burstEvery: 1.2, // seconds between extra spawns
+  speedPerMin: 0.025, // enemies get this much faster every minute, up to 15
   meowPush: 90, // knockback of the meow aura
   xpPerMin: 0.15, // gems grow by this share every minute, as levels get dearer
 };
@@ -176,7 +181,7 @@ export interface Pickup {
 export type SimEvent =
   | { t: 'hit'; x: number; y: number; dmg: number }
   | { t: 'kill'; x: number; y: number; kind: EnemyKind; elite: boolean }
-  | { t: 'hurt'; dmg: number }
+  | { t: 'hurt'; dmg: number; kind: EnemyKind }
   | { t: 'level' }
   | { t: 'boss' }
   | { t: 'cleaner' }
@@ -413,7 +418,8 @@ export class CatRun {
       r: def.r,
       hp,
       maxHp: hp,
-      speed: def.speed,
+      // The first minutes are slow enough to turn, hit and run; later ones are not.
+      speed: kind === 'cleaner' || kind === 'mop' ? def.speed : def.speed * (1 + Math.min(m, 15) * BALANCE.speedPerMin),
       dmg: def.dmg,
       xp: elite ? 60 * (1 + m) : def.xp * (1 + m * BALANCE.xpPerMin),
       kx: 0,
@@ -775,11 +781,11 @@ export class CatRun {
       [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
-      if (d < en.r + p.r && p.inv <= 0 && !en.dead) {
+      if (d < (en.r + p.r) * CONTACT && p.inv <= 0 && !en.dead) {
         const dmg = Math.max(1, en.dmg - this.stats.armor);
         p.hp -= dmg;
         p.inv = Math.round(0.4 * TICK_RATE);
-        this.emit({ t: 'hurt', dmg });
+        this.emit({ t: 'hurt', dmg, kind: en.kind });
         if (p.hp <= 0) {
           p.hp = 0;
           this.finish(false);

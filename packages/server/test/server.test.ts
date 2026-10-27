@@ -441,6 +441,18 @@ for (const [name, makeStore] of stores) {
       assert.ok(stats.days[0].shares > 0);
     });
 
+    test('the runs page replays finished runs for the owner', async () => {
+      await play(160);
+      assert.equal((await app.inject({ method: 'GET', url: '/api/admin/runs' })).statusCode, 404);
+      const res = await app.inject({ method: 'GET', url: '/api/admin/runs?limit=3', headers: { 'x-admin-key': config.adminKey! } });
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.ok(body.runs.length > 0 && body.runs.length <= 3);
+      assert.equal(body.runs[0].name, 'P160');
+      assert.ok(body.runs[0].insight.minutes.length > 0);
+      assert.equal(body.summary.runs, body.runs.filter((r: { insight: unknown }) => r.insight).length);
+    });
+
     test('profile stats: finished runs, wins and the best result', async () => {
       const r = await play(150);
       const me = (await get(150, '/api/me')).json();

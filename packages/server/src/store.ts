@@ -26,6 +26,11 @@ export interface StoredRun extends RunOutcome {
   record: RunRecord | null; // the progress saved so far; the final input once finished
 }
 
+export interface RecentRun extends StoredRun {
+  name: string;
+  finishedAt: number; // ms
+}
+
 export interface NewRun {
   seed: number;
   mode: RunMode;
@@ -139,6 +144,8 @@ export interface Store {
   saveProgress(runId: string, record: RunRecord): Promise<boolean>;
   // Saves the result once; false when the run was already finished.
   finishRun(runId: string, outcome: RunOutcome, record: RunRecord): Promise<boolean>;
+  // The latest finished runs of everyone, newest first, for the admin page.
+  recentRuns(limit: number): Promise<RecentRun[]>;
   dailyRun(userId: number, date: string): Promise<StoredRun | null>;
   // Finished runs of the day's challenge: a win, then the longest, then most kills, then who finished first.
   dailyTop(date: string, limit: number): Promise<ScoreRow[]>;
@@ -254,6 +261,14 @@ export class MemoryStore implements Store {
     if (!r || r.finished) return false;
     Object.assign(r, outcome, { finished: true, record: { ...record }, finishedAt: Date.now() + ++this.seq / 1000 });
     return true;
+  }
+
+  async recentRuns(limit: number): Promise<RecentRun[]> {
+    return [...this.runs.values()]
+      .filter((r) => r.finished)
+      .sort((a, b) => b.finishedAt - a.finishedAt)
+      .slice(0, limit)
+      .map((r) => ({ ...toStored(r), name: this.name(r.userId), finishedAt: Math.floor(r.finishedAt) }));
   }
 
   async dailyRun(userId: number, date: string): Promise<StoredRun | null> {

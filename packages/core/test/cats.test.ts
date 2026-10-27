@@ -187,3 +187,21 @@ test('at 20:00 the room is won and the Cleaner ends the run', () => {
   assert.equal(run.won, true);
   assert.ok(run.tick > cats.RUN_TICKS && run.tick < cats.END_TICKS, 'she catches a cat that stands still');
 });
+
+test('a run analysis matches its replay and counts every hit', () => {
+  const bot = cats.playBot(5, cats.BOT_STYLES.mixed, cats.BOT_SKILLS.casual);
+  const rec = bot.record();
+  const r = cats.replay(5, rec).result();
+  const a = cats.analyze(5, rec);
+  assert.equal(a.won, r.won);
+  assert.equal(a.kills, r.kills);
+  assert.equal(a.minutes.reduce((n, m) => n + m.kills, 0), r.kills);
+  assert.equal(a.minutes.length, Math.ceil(r.ticks / (60 * cats.TICK_RATE)));
+  const hits = Object.values(a.hurt).reduce((n, h) => n + h!.hits, 0);
+  assert.equal(a.minutes.reduce((n, m) => n + m.hits, 0), hits);
+  assert.equal(a.picks.length, r.level - 1);
+  if (!a.won) assert.ok(a.deathBy);
+  const s = cats.summarize([a, a]);
+  assert.equal(s.runs, 2);
+  assert.equal(s.perMinute[0].alive, 2);
+});

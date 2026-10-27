@@ -10,16 +10,21 @@ export type Replayer = (seed: number, rec: RunRecord) => Promise<RunResult>;
 // In the same thread: for tests and the in-memory dev server.
 export const replayHere: Replayer = async (seed, rec) => cats.replay(seed, rec).result();
 
+// Replays a record with events to see how the run went, for the admin page.
+export type Analyzer = (seed: number, rec: RunRecord) => Promise<cats.RunInsight>;
+export const analyzeHere: Analyzer = async (seed, rec) => cats.analyze(seed, rec);
+
 interface Job {
   seed: number;
   rec: RunRecord;
-  resolve: (r: RunResult) => void;
+  analyze: boolean;
+  resolve: (r: never) => void;
   reject: (e: Error) => void;
 }
 
 // A 20-minute run takes about a second to replay, so replays run in worker
 // threads and the server keeps answering meanwhile.
-export function workerReplayer(size = Math.max(1, Math.min(4, availableParallelism() - 1))): Replayer & { close(): Promise<void> } {
+export function workerReplayer(size = Math.max(1, Math.min(4, availableParallelism() - 1))): Replayer & { analyze: Analyzer; close(): Promise<void> } {
   const queue: Job[] = [];
   const idle: Worker[] = [];
   const busy = new Map<Worker, Job>();
@@ -29,12 +34,12 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
       const w = idle.pop()!;
       const job = queue.shift()!;
       busy.set(w, job);
-      w.postMessage({ seed: job.seed, rec: job.rec });
+      w.postMessage({ seed: job.seed, rec: job.rec, analyze: job.analyze });
     }
   };
   const spawn = () => {
     const w = new Worker(new URL('./replayWorker.ts', import.meta.url));
-    w.on('message', (m: { result?: RunResult; error?: string }) => {
+    w.on('message', (m: { result?: never; error?: string }) => {
       const job = busy.get(w);
       busy.delete(w);
       idle.push(w);
@@ -56,12 +61,15 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
   };
   for (let i = 0; i < size; i++) spawn();
 
-  const replay = (seed: number, rec: RunRecord) =>
-    new Promise<RunResult>((resolve, reject) => {
-      queue.push({ seed, rec, resolve, reject });
-      pump();
-    });
-  return Object.assign(replay, {
+  const job =
+    <T>(analyze: boolean) =>
+    (seed: number, rec: RunRecord) =>
+      new Promise<T>((resolve, reject) => {
+        queue.push({ seed, rec, analyze, resolve, reject });
+        pump();
+      });
+  return Object.assign(job<RunResult>(false), {
+    analyze: job<cats.RunInsight>(true),
     async close() {
       await Promise.all([...idle, ...busy.keys()].map((w) => w.terminate()));
     },
