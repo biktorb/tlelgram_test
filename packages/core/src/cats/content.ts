@@ -16,14 +16,14 @@ export interface EnemyDef {
 }
 
 // Modelled on Mad Forest at about 70% of its health and damage: mice are
-// bats (weak, faster than the cat), dust is zombies and skeletons, robots
+// bats (weak, the fastest chasers), dust is zombies and skeletons, robots
 // are mudmen that charge, the big robot is the Mantichana-type elite.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
-  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 125, dmg: 4, xp: 1, move: 'chase' },
-  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 95, dmg: 7, xp: 1.5, move: 'chase' },
-  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 175, dmg: 7, xp: 2.5, move: 'charge' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 120, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 120, dmg: 30, xp: 0, move: 'chase' },
+  mouse: { name: 'Мышь', r: 10, hp: 4, speed: 110, dmg: 4, xp: 1, move: 'chase' },
+  dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 80, dmg: 7, xp: 1.5, move: 'chase' },
+  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 145, dmg: 7, xp: 2.5, move: 'charge' },
+  bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 85, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },
 };
 
 // The cat's stats. Weapons read them, passives and the hero change them.
@@ -135,7 +135,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     'Клубок',
     'Клубки кружат вокруг кота',
     { dmg: 10, cd: 3, amount: 1, area: 1, speed: 1, duration: 3, pierce: 0 },
-    [{ amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }],
+    [{ amount: 1 }, { speed: 0.25, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }, { speed: 0.25, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }],
   ),
   // Garlic: an aura that hurts and pushes enemies around the cat.
   meow: weapon(
@@ -163,7 +163,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     'Статическая шерсть',
     'Искры бьют случайных врагов на экране',
     { dmg: 15, cd: 4.5, amount: 2, area: 1, speed: 1, duration: 0, pierce: 0 },
-    [{ amount: 1 }, { area: 0.5, dmg: 10 }, { amount: 1 }, { area: 0.5, dmg: 20 }, { amount: 1 }, { area: 0.5, dmg: 20 }, { amount: 1 }],
+    [{ amount: 1 }, { area: 1, dmg: 10 }, { amount: 1 }, { area: 1, dmg: 20 }, { amount: 1 }, { area: 1, dmg: 20 }, { amount: 1 }],
   ),
 };
 
@@ -180,7 +180,7 @@ export const PASSIVES: Record<PassiveId, PassiveDef> = {
   paws: { name: 'Ловкие лапы', max: 5, per: { speed: 0.1 }, desc: 'Скорость снарядов +10%' },
   patience: { name: 'Долгое мурчание', max: 5, per: { duration: 0.1 }, desc: 'Атаки длятся дольше на 10%' },
   purr: { name: 'Мурчалка', max: 5, per: { recovery: 0.2 }, desc: '+0,2 здоровья в секунду' },
-  catnip: { name: 'Мята в кармане', max: 5, per: { magnet: 15 }, desc: 'Кристаллы собираются издалека' },
+  catnip: { name: 'Мята в кармане', max: 5, per: { magnet: 24 }, desc: 'Радиус сбора кристаллов +30%' },
   bigpaws: { name: 'Большие лапы', max: 5, per: { area: 0.1 }, desc: 'Область атак +10%' },
   pack: { name: 'Кошачья стая', max: 2, per: { amount: 1 }, desc: '+1 снаряд ко всему оружию' },
   food: { name: 'Премиальный корм', max: 5, per: { might: 0.1 }, desc: 'Урон +10%' },
