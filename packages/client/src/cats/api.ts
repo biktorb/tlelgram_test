@@ -11,6 +11,7 @@ export interface RunView {
   daily: string | null;
   duel: string | null;
   hero: cats.HeroId;
+  room: cats.RoomId;
   progress: RunRecord | null; // input saved so far
 }
 
@@ -18,6 +19,7 @@ export interface Ghost {
   name: string;
   aura: string | null;
   hero: cats.HeroId;
+  room: cats.RoomId;
   seed: number;
   record: RunRecord;
   won: boolean;
@@ -54,6 +56,7 @@ export interface Score {
 
 export interface DailyInfo {
   date: string;
+  room: cats.RoomId;
   status: 'none' | 'active' | 'finished';
   top: Score[];
   rank: number | null;
@@ -84,6 +87,7 @@ export interface HeroInfo {
 export interface Profile {
   fish: number;
   heroes: HeroInfo[];
+  rooms: { id: cats.RoomId; owned: boolean }[];
   frame: string | null; // equipped aura
   owned: string[];
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
@@ -134,7 +138,7 @@ export class Api {
 
   me = () => this.call<Me>('GET', '/api/me');
   current = async () => (await this.call<{ current: Started | null }>('GET', '/api/runs/current')).current;
-  start = (mode: RunMode, hero: cats.HeroId, duel?: string) => this.call<Started>('POST', '/api/runs', { mode, duel, hero });
+  start = (mode: RunMode, hero: cats.HeroId, room: cats.RoomId, duel?: string) => this.call<Started>('POST', '/api/runs', { mode, duel, hero, room });
   progress = (runId: string, rec: RunRecord) => this.call<void>('POST', `/api/runs/${runId}/progress`, rec);
   finish = (runId: string, rec: RunRecord) => this.call<Finished>('POST', `/api/runs/${runId}/finish`, rec);
   daily = async () => (await this.call<{ daily: DailyInfo }>('GET', '/api/daily')).daily;

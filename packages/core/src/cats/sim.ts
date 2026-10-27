@@ -6,6 +6,7 @@ import {
   HEROES,
   PASSIVES,
   PASSIVE_IDS,
+  ROOMS,
   SLOTS,
   WEAPONS,
   WEAPON_IDS,
@@ -18,6 +19,7 @@ import {
   type HeroId,
   type ItemId,
   type PassiveId,
+  type RoomId,
   type Stats,
   type WeaponId,
   type WeaponStats,
@@ -69,15 +71,6 @@ export const BALANCE = {
 // The fewest enemies around the cat in each minute, after Mad Forest.
 const CROWD = [15, 30, 50, 45, 40, 40, 60, 80, 100, 90, 100, 160, 150, 160, 180, 200, 220, 240, 220, 260];
 
-// The room's enemy mix by minute: weights of each kind.
-const WAVES: { from: number; mix: Partial<Record<EnemyKind, number>> }[] = [
-  { from: 0, mix: { mouse: 1 } },
-  { from: 3, mix: { mouse: 0.7, dust: 0.3 } },
-  { from: 6, mix: { mouse: 0.5, dust: 0.42, robot: 0.08 } },
-  { from: 10, mix: { mouse: 0.4, dust: 0.45, robot: 0.15 } },
-  { from: 15, mix: { mouse: 0.35, dust: 0.4, robot: 0.25 } },
-];
-
 // Joystick direction: 0 is "stand still", 1..16 point around the circle
 // starting from the right and going clockwise on screen (y grows down).
 export const DIRECTIONS = 16;
@@ -122,7 +115,27 @@ export interface Enemy {
   dead: boolean;
   hitTick: number;
   yarnTick: number; // ticks until the yarn can hit it again
+  timer: number; // dogs: ticks of the dash left (> 0) or until the next (< 0)
+  leader: number; // a hose segment follows this enemy; 0 for the head
 }
+
+// Things enemies leave behind: slippery water from washers slows the cat,
+// leaves from the blower hurt it.
+export interface Hazard {
+  id: number;
+  kind: 'puddle' | 'leaf';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  r: number;
+  life: number; // ticks
+}
+
+const FLOCK = 5; // pigeons in a flock
+const HOSE = 6; // segments in a hose
+const PUDDLE_SLOW = 0.55;
+const LEAF_DMG = 10;
 
 export type ShotKind = 'laser' | 'fish' | 'pot';
 
@@ -182,6 +195,7 @@ export type SimEvent =
   | { t: 'hit'; x: number; y: number; dmg: number }
   | { t: 'kill'; x: number; y: number; kind: EnemyKind; elite: boolean }
   | { t: 'hurt'; dmg: number; kind: EnemyKind }
+  | { t: 'wind'; x: number; y: number }
   | { t: 'level' }
   | { t: 'boss' }
   | { t: 'cleaner' }
@@ -216,6 +230,7 @@ export const compareScores = (a: Score, b: Score): number => Number(b.won) - Num
 export interface RunOptions {
   events?: boolean;
   hero?: HeroId;
+  room?: RoomId;
 }
 
 // Removes the items that fail `keep`, in place and in order.
@@ -229,6 +244,7 @@ export class CatRun {
   readonly seed: number;
   readonly rng: Rng;
   readonly hero: HeroId;
+  readonly room: RoomId;
   tick = 0;
   over = false;
   won = false;
@@ -250,6 +266,8 @@ export class CatRun {
   shots: Shot[] = [];
   zones: Zone[] = [];
   gems: Gem[] = [];
+  hazards: Hazard[] = [];
+  wind = 0; // ticks the blower keeps blowing
   pickups: Pickup[] = [];
   freeze = 0; // ticks the vacuums stay unplugged
   // Yarn: the angle of the first ball, and ticks left while it spins.
@@ -271,7 +289,8 @@ export class CatRun {
     this.rng = new Rng(this.seed);
     this.trackEvents = opts.events ?? true;
     this.hero = opts.hero ?? 'ryzhik';
-    this.map = new RoomMap(this.seed);
+    this.room = opts.room ?? 'flat';
+    this.map = new RoomMap(this.seed, ROOMS[this.room].shape);
     this.items[HEROES[this.hero].weapon] = 1;
     this.recompute();
     this.player.hp = this.player.maxHp;
@@ -343,8 +362,11 @@ export class CatRun {
     this.tick++;
     const p = this.player;
     const [mx, my] = DIR_VECTORS[dir] ?? DIR_VECTORS[0];
-    p.x += mx * this.stats.move * DT;
-    p.y += my * this.stats.move * DT;
+    // Water slows the cat; belts, wind and the king's pull carry it.
+    const slow = this.hazards.length && this.inPuddle() ? PUDDLE_SLOW : 1;
+    const [fx, fy] = this.floorPush();
+    p.x += (mx * this.stats.move * slow + fx) * DT;
+    p.y += (my * this.stats.move * slow + fy) * DT;
     [p.x, p.y] = this.map.pushOut(p.x, p.y, p.r);
     if (mx || my) {
       p.dx = mx;
@@ -362,12 +384,16 @@ export class CatRun {
     this.separate();
     this.moveShots();
     this.tickZones();
+    this.tickHazards();
+    if (this.over) return;
+    this.bossActs();
     this.collectGems();
     this.collectPickups();
 
     compact(this.enemies, (e) => !e.dead);
     compact(this.shots, (s) => s.life > 0);
     compact(this.zones, (z) => z.life > 0);
+    compact(this.hazards, (z) => z.life > 0);
     compact(this.gems, (g) => !g.got);
     compact(this.pickups, (g) => !g.got);
     if (!this.over && this.tick >= END_TICKS) this.finish(true);
@@ -404,9 +430,14 @@ export class CatRun {
   // ---------- spawning ----------
   private spawn(kind: EnemyKind, elite = false): Enemy {
     const def = ENEMIES[kind];
-    const a = this.rng.next() * Math.PI * 2;
+    let a = this.rng.next() * Math.PI * 2;
+    // Between fences or walls, look for a side of the cat with floor.
+    for (let i = 0; i < 8 && !this.map.inside(this.player.x + dcos(a) * SPAWN_DISTANCE, this.player.y + dsin(a) * SPAWN_DISTANCE); i++) {
+      a = this.rng.next() * Math.PI * 2;
+    }
     const m = this.time / 60;
-    const scale = kind === 'mop' ? 1 : 1 + m * BALANCE.hpPerMin + m * m * BALANCE.hpPerMin2;
+    const boss = kind === ROOMS[this.room].boss;
+    const scale = boss ? 1 : 1 + m * BALANCE.hpPerMin + m * m * BALANCE.hpPerMin2;
     const hp = def.hp * scale;
     const x = this.player.x + dcos(a) * SPAWN_DISTANCE;
     const y = this.player.y + dsin(a) * SPAWN_DISTANCE;
@@ -419,7 +450,7 @@ export class CatRun {
       hp,
       maxHp: hp,
       // The first minutes are slow enough to turn, hit and run; later ones are not.
-      speed: kind === 'cleaner' || kind === 'mop' ? def.speed : def.speed * (1 + Math.min(m, 15) * BALANCE.speedPerMin),
+      speed: kind === 'cleaner' || boss ? def.speed : def.speed * (1 + Math.min(m, 15) * BALANCE.speedPerMin),
       dmg: def.dmg,
       xp: elite ? 60 * (1 + m) : def.xp * (1 + m * BALANCE.xpPerMin),
       kx: 0,
@@ -430,11 +461,48 @@ export class CatRun {
       dead: false,
       hitTick: -100,
       yarnTick: 0,
+      timer: 0,
+      leader: 0,
     };
     [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
-    if (def.move === 'charge') this.aim(en);
+    if (def.move === 'charge' || def.move === 'flock') this.aim(en);
     this.enemies.push(en);
     return en;
+  }
+
+  // Puts an enemy inside the walls; in the open flat it may stand anywhere
+  // for a tick, its next move pushes it out of furniture.
+  private place(x: number, y: number, r: number): [number, number] {
+    return this.map.bounds ? this.map.pushOut(x, y, r) : [x, y];
+  }
+
+  // One enemy, or the group it comes in: pigeons fly in a flock side by
+  // side, a hose comes as a chain of segments. Returns how many came.
+  private spawnGroup(kind: EnemyKind): number {
+    const head = this.spawn(kind);
+    const move = ENEMIES[kind].move;
+    if (move === 'flock') {
+      // Abreast, across the line of flight.
+      for (let i = 1; i < FLOCK && this.enemies.length < MAX_ENEMIES; i++) {
+        const e = this.spawn(kind);
+        const side = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 26;
+        [e.x, e.y] = this.map.pushOut(head.x - head.vy * side - head.vx * (i % 3) * 14, head.y + head.vx * side - head.vy * (i % 3) * 14, e.r);
+        e.vx = head.vx;
+        e.vy = head.vy;
+      }
+      return FLOCK;
+    }
+    if (move === 'follow') {
+      let prev = head;
+      for (let i = 1; i < HOSE && this.enemies.length < MAX_ENEMIES; i++) {
+        const e = this.spawn(kind);
+        [e.x, e.y] = this.map.pushOut(prev.x + (prev.x - this.player.x) * 0.05, prev.y + (prev.y - this.player.y) * 0.05, e.r);
+        e.leader = prev.id;
+        prev = e;
+      }
+      return HOSE;
+    }
+    return 1;
   }
 
   // A charging enemy picks the line through the cat and keeps it.
@@ -448,8 +516,9 @@ export class CatRun {
 
   private pickKind(): EnemyKind {
     const minute = this.time / 60;
-    let mix = WAVES[0].mix;
-    for (const w of WAVES) if (minute >= w.from) mix = w.mix;
+    const waves = ROOMS[this.room].waves;
+    let mix = waves[0].mix;
+    for (const w of waves) if (minute >= w.from) mix = w.mix;
     let r = this.rng.next();
     const kinds = Object.keys(mix) as EnemyKind[];
     for (const k of kinds) {
@@ -472,39 +541,42 @@ export class CatRun {
     // Keep a crowd around the cat, growing over the run.
     const crowd = Math.round(CROWD[Math.min(CROWD.length - 1, Math.floor(this.time / 60))] * BALANCE.crowdScale);
     let n = 0;
-    while (this.enemies.length < Math.min(crowd, MAX_ENEMIES) && n++ < 6) this.spawn(this.pickKind());
+    while (this.enemies.length < Math.min(crowd, MAX_ENEMIES) && n < 6) n += this.spawnGroup(this.pickKind());
     // And small bursts on top of it.
     this.burstAcc += DT;
     if (this.burstAcc >= BALANCE.burstEvery) {
       this.burstAcc -= BALANCE.burstEvery;
       const size = 1 + Math.floor((this.time / 60) * 0.4);
       const cap = Math.min(MAX_ENEMIES, crowd * 1.5);
-      for (let i = 0; i < size && this.enemies.length < cap; i++) this.spawn(this.pickKind());
+      for (let i = 0; i < size && this.enemies.length < cap; ) i += this.spawnGroup(this.pickKind());
     }
+    const room = ROOMS[this.room];
     if (ELITE_TICKS.includes(this.tick)) {
-      const e = this.spawn('bigrobot', true);
-      e.hp = e.maxHp = ENEMIES.bigrobot.hp * this.level; // like VS bosses: health times the cat's level
+      const e = this.spawn(room.elite, true);
+      e.hp = e.maxHp = ENEMIES[room.elite].hp * this.level; // like VS bosses: health times the cat's level
       this.emit({ t: 'elite' });
     }
     if (MINI_ELITE_TICKS.includes(this.tick)) {
-      const e = this.spawn('dust', true);
+      const e = this.spawn(room.miniElite, true);
       e.r *= 1.8;
       e.hp = e.maxHp = 25 * this.level;
-      e.dmg = 8;
+      e.dmg = Math.max(8, e.dmg + 1);
     }
     if (this.tick === BOSS_TICK) {
-      this.spawn('mop', true);
+      this.spawn(room.boss, true);
       this.emit({ t: 'boss' });
     }
-    // The mop sweeps in dust around itself.
+    // The boss calls in its helpers around itself.
     if (this.tick > BOSS_TICK && this.tick % (3 * TICK_RATE) === 0) {
-      const mop = this.enemies.find((e) => e.kind === 'mop');
-      if (mop) {
-        for (let i = 0; i < 6 && this.enemies.length < MAX_ENEMIES; i++) {
-          const d = this.spawn('dust');
-          const a = (i * Math.PI) / 3;
-          d.x = mop.x + dcos(a) * 60;
-          d.y = mop.y + dsin(a) * 60;
+      const boss = this.enemies.find((e) => e.kind === room.boss);
+      if (boss) {
+        if (ENEMIES[room.minion].move === 'flock') this.spawnGroup(room.minion);
+        else {
+          for (let i = 0; i < 6 && this.enemies.length < MAX_ENEMIES; i++) {
+            const d = this.spawn(room.minion);
+            const a = (i * Math.PI) / 3;
+            [d.x, d.y] = this.place(boss.x + dcos(a) * 60, boss.y + dsin(a) * 60, d.r);
+          }
         }
       }
     }
@@ -757,27 +829,67 @@ export class CatRun {
       this.freeze--;
       return;
     }
+    let byId: Map<number, Enemy> | null = null;
     for (const en of this.enemies) {
       const dx = p.x - en.x;
       const dy = p.y - en.y;
       const d = len(dx, dy) || 1;
+      const move = ENEMIES[en.kind].move;
       if (d > DESPAWN_DISTANCE) {
+        // A flock that flew past is gone.
+        if (move === 'flock') {
+          en.dead = true;
+          continue;
+        }
         // Left far behind: it comes back from the other side of the screen.
-        en.x = p.x + (dx / d) * SPAWN_DISTANCE;
-        en.y = p.y + (dy / d) * SPAWN_DISTANCE;
-        if (ENEMIES[en.kind].move === 'charge') this.aim(en);
+        [en.x, en.y] = this.place(p.x + (dx / d) * SPAWN_DISTANCE, p.y + (dy / d) * SPAWN_DISTANCE, en.r);
+        if (move === 'charge') this.aim(en);
         continue;
       }
       let ux = dx / d;
       let uy = dy / d;
-      if (ENEMIES[en.kind].move === 'charge') {
+      let speed = en.speed;
+      if (move === 'charge') {
         // Passed the cat and drove on: turn around.
         if (d > SPAWN_DISTANCE && en.vx * dx + en.vy * dy < 0) this.aim(en);
         ux = en.vx;
         uy = en.vy;
+      } else if (move === 'flock') {
+        ux = en.vx;
+        uy = en.vy;
+      } else if (move === 'dash') {
+        // Walks up, then lunges along a line; rests a little after.
+        if (en.timer > 0) {
+          en.timer--;
+          ux = en.vx;
+          uy = en.vy;
+          speed *= 2.2;
+          if (en.timer === 0) en.timer = -Math.round(2.5 * TICK_RATE);
+        } else if (en.timer < 0) en.timer++;
+        else if (d < (en.elite ? 280 : 150)) {
+          this.aim(en);
+          en.timer = Math.round((en.elite ? 0.7 : 0.4) * TICK_RATE);
+        }
+      } else if (move === 'follow' && en.leader) {
+        // A hose segment keeps close behind the one ahead.
+        byId ??= new Map(this.enemies.map((e) => [e.id, e]));
+        const l = byId.get(en.leader);
+        if (!l || l.dead) en.leader = 0;
+        else {
+          const lx = l.x - en.x;
+          const ly = l.y - en.y;
+          const ld = len(lx, ly) || 1;
+          ux = lx / ld;
+          uy = ly / ld;
+          speed = ld < en.r * 1.6 ? 0 : Math.min(speed * 1.6, (ld - en.r * 1.6) * TICK_RATE);
+        }
       }
-      en.x += (ux * en.speed + en.kx) * DT;
-      en.y += (uy * en.speed + en.ky) * DT;
+      en.x += (ux * speed + en.kx) * DT;
+      en.y += (uy * speed + en.ky) * DT;
+      // Washers leave slippery water behind.
+      if (en.kind === 'washer' && (this.tick + en.id) % (TICK_RATE * 1.2) === 0) {
+        this.hazards.push({ id: this.nextId++, kind: 'puddle', x: en.x, y: en.y, vx: 0, vy: 0, r: 30 + en.r, life: 6 * TICK_RATE });
+      }
       [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
       en.kx *= KNOCKBACK_DECAY;
       en.ky *= KNOCKBACK_DECAY;
@@ -786,6 +898,95 @@ export class CatRun {
         p.hp -= dmg;
         p.inv = Math.round(0.4 * TICK_RATE);
         this.emit({ t: 'hurt', dmg, kind: en.kind });
+        if (p.hp <= 0) {
+          p.hp = 0;
+          this.finish(false);
+          return;
+        }
+      }
+    }
+  }
+
+  // The boss of the room: the blower blows the cat away and throws leaves,
+  // the king pulls it in. Industrial vacuums suck gems off the floor.
+  private bossActs(): void {
+    if (this.wind > 0) this.wind--;
+    if (this.room === 'yard' && this.tick > BOSS_TICK && this.tick % (4 * TICK_RATE) === 0) {
+      const b = this.enemies.find((e) => e.kind === 'blower' && !e.dead);
+      if (b) {
+        this.wind = Math.round(1.5 * TICK_RATE);
+        this.emit({ t: 'wind', x: b.x, y: b.y });
+        const base = Math.atan2(this.player.y - b.y, this.player.x - b.x);
+        for (let i = -2; i <= 2; i++) {
+          const a = base + i * 0.22;
+          this.hazards.push({ id: this.nextId++, kind: 'leaf', x: b.x, y: b.y, vx: dcos(a) * 230, vy: dsin(a) * 230, r: 9, life: 3 * TICK_RATE });
+        }
+      }
+    }
+    if (this.room !== 'warehouse') return;
+    for (const en of this.enemies) {
+      if (en.kind !== 'industrial' || en.dead) continue;
+      for (const g of this.gems) {
+        if (g.pull || g.got) continue;
+        const dx = en.x - g.x;
+        const dy = en.y - g.y;
+        const d = len(dx, dy) || 1;
+        if (d > 260) continue;
+        if (d < en.r) {
+          // Eaten: it comes back when the vacuum is beaten.
+          g.got = true;
+          en.xp += g.v;
+          continue;
+        }
+        const step = Math.min(d, 120 * DT);
+        g.x += (dx / d) * step;
+        g.y += (dy / d) * step;
+      }
+    }
+  }
+
+  // What moves the cat besides its paws: belts, the blower's wind, the king's pull.
+  private floorPush(): [number, number] {
+    const p = this.player;
+    let fx = this.map.belts.length ? this.map.belt(p.x, p.y) : 0;
+    let fy = 0;
+    if (this.tick > BOSS_TICK && (this.wind > 0 || this.room === 'warehouse')) {
+      const kind = this.room === 'warehouse' ? 'king' : 'blower';
+      const b = this.enemies.find((e) => e.kind === kind && !e.dead);
+      if (b) {
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
+        const d = len(dx, dy) || 1;
+        // Away from the blower, towards the king.
+        const f = kind === 'blower' ? 110 : d < 900 ? -45 : 0;
+        fx += (dx / d) * f;
+        fy += (dy / d) * f;
+      }
+    }
+    return [fx, fy];
+  }
+
+  private inPuddle(): boolean {
+    const p = this.player;
+    for (const z of this.hazards) if (z.kind === 'puddle' && (z.x - p.x) ** 2 + (z.y - p.y) ** 2 < z.r * z.r) return true;
+    return false;
+  }
+
+  // Leaves fly and hurt; puddles dry up.
+  private tickHazards(): void {
+    if (!this.hazards.length) return;
+    const p = this.player;
+    for (const z of this.hazards) {
+      z.life--;
+      if (z.kind !== 'leaf') continue;
+      z.x += z.vx * DT;
+      z.y += z.vy * DT;
+      if (p.inv <= 0 && (z.x - p.x) ** 2 + (z.y - p.y) ** 2 < (z.r + p.r * CONTACT) ** 2) {
+        z.life = 0;
+        const dmg = Math.max(1, LEAF_DMG - this.stats.armor);
+        p.hp -= dmg;
+        p.inv = Math.round(0.4 * TICK_RATE);
+        this.emit({ t: 'hurt', dmg, kind: 'blower' });
         if (p.hp <= 0) {
           p.hp = 0;
           this.finish(false);

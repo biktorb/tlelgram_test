@@ -21,6 +21,7 @@ export interface RunView {
   daily: string | null; // date of the daily challenge this run plays
   duel: string | null; // code of the duel this run answers
   hero: cats.HeroId;
+  room: cats.RoomId;
   progress: RunRecord | null; // input saved so far, to continue the run
 }
 
@@ -43,9 +44,16 @@ export interface HeroInfo {
   need: number;
 }
 
+// A room in the room list: open, or which room to survive first.
+export interface RoomInfo {
+  id: cats.RoomId;
+  owned: boolean;
+}
+
 export interface Profile {
   fish: number;
   heroes: HeroInfo[];
+  rooms: RoomInfo[];
   frame: string | null;
   owned: string[];
   tasks: { id: string; title: string; goal: number; reward: number; progress: number; done: boolean }[];
@@ -63,6 +71,7 @@ type Score = { name: string; won: boolean; ticks: number; kills: number; me: boo
 
 export interface DailyInfo {
   date: string;
+  room: cats.RoomId;
   status: 'none' | 'active' | 'finished'; // the player's attempt today
   top: Score[];
   rank: number | null; // the player's place once their attempt is finished
@@ -73,6 +82,8 @@ const DAY_OFFSET_MS = 3 * 3600 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
 export const dayOf = (now: number) => new Date(now + DAY_OFFSET_MS).toISOString().slice(0, 10);
 export const dailySeed = (date: string) => hashSeed(`daily:${date}`);
+// The day's room, the same for everyone; a locked room can be tried here.
+export const dailyRoom = (date: string): cats.RoomId => cats.ROOM_IDS[hashSeed(`room:${date}`) % cats.ROOM_IDS.length];
 // Weeks start on Monday; a week is named by its Monday.
 export const weekOf = (now: number) => {
   const d = new Date(now + DAY_OFFSET_MS);
@@ -128,7 +139,7 @@ export interface Notifier {
 const SPEED_MARGIN = 0.95;
 const SLACK_MS = 3000;
 
-const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, hero: r.hero, progress: r.record });
+const view = (r: StoredRun): RunView => ({ id: r.id, seed: r.seed, mode: r.mode, daily: r.daily, duel: r.duelCode, hero: r.hero, room: r.room, progress: r.record });
 
 const CODE_ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const DUEL_CODE = /^[a-zA-Z0-9]{8}$/;
@@ -165,6 +176,7 @@ export class Game {
     duelCode: string | null = null,
     chatInstance: string | null = null,
     hero: cats.HeroId = 'ryzhik',
+    room: cats.RoomId = 'flat',
   ): Promise<StartResult> {
     let seed = randomInt(0, 2 ** 31);
     let daily: string | null = null;
@@ -175,24 +187,27 @@ export class Game {
       if (existing && !existing.finished) return { run: view(existing), ghost: await this.store.dailyGhost(daily, userId) };
       if (existing) throw new GameError(409, 'Вызов дня уже сыгран, новый будет завтра');
       seed = dailySeed(daily);
+      room = dailyRoom(daily);
       ghost = await this.store.dailyGhost(daily, userId);
     }
     if (mode === 'duel') {
       const duel = await this.duel(duelCode ?? '');
       if (duel.challengerId === userId) throw new GameError(422, 'Это ваш собственный вызов');
       seed = duel.run.seed;
+      room = duel.run.room;
       ghost = ghostOf(duel.run, duel.challengerName);
       duelCode = duel.code;
     } else duelCode = null;
     // Every mode is played with the player's own cat, a duel too.
     if (!(await this.heroes(userId)).find((h) => h.id === hero)?.owned) throw new GameError(422, 'Этот кот ещё не открыт');
+    if (mode === 'free' && !(await this.rooms(userId)).find((r) => r.id === room)?.owned) throw new GameError(422, 'Эта комната ещё не открыта');
 
     const active = await this.store.activeRun(userId);
     if (active) await this.settle(active, playerName, active.record ?? { moves: '', picks: '' });
     try {
       const { frame } = await this.store.wallet(userId);
-      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame, hero });
-      await this.track(userId, 'run_start', { mode, hero });
+      const run = await this.store.createRun(userId, { seed, mode, daily, duelCode, chatInstance, aura: frame, hero, room });
+      await this.track(userId, 'run_start', { mode, hero, room });
       return { run: view(run), ghost };
     } catch (e) {
       if (e instanceof DailyTakenError) throw new GameError(409, 'Вызов дня уже начат в другом окне');
@@ -252,7 +267,7 @@ export class Game {
   private async settle(run: StoredRun, playerName: string, rec: RunRecord): Promise<FinishResult | null> {
     let r;
     try {
-      r = await this.replay(run.seed, rec, run.hero);
+      r = await this.replay(run.seed, rec, { hero: run.hero, room: run.room });
     } catch {
       throw new GameError(400, 'Неверная запись забега');
     }
@@ -260,7 +275,7 @@ export class Game {
     if (!(await this.store.finishRun(run.id, result, rec))) return null;
 
     await this.countLeagueRun(run.userId, result.points);
-    await this.track(run.userId, 'run_end', { seconds: Math.round(r.ticks / TICK_RATE), won: r.won, mode: run.mode, duel: run.mode === 'duel', hero: run.hero });
+    await this.track(run.userId, 'run_end', { seconds: Math.round(r.ticks / TICK_RATE), won: r.won, mode: run.mode, duel: run.mode === 'duel', hero: run.hero, room: run.room });
     const out: FinishResult = { result };
     if (run.daily) out.daily = { rank: await this.store.dailyRank(run.userId, run.daily) };
     if (run.duelCode) {
@@ -285,6 +300,7 @@ export class Game {
     ]);
     return {
       date,
+      room: dailyRoom(date),
       status: !mine ? 'none' : mine.finished ? 'finished' : 'active',
       top: top.map(({ userId: id, name, won, ticks, kills }) => ({ name, won, ticks, kills, me: id === userId })),
       rank,
@@ -355,8 +371,17 @@ export class Game {
     });
     for (const t of tasks) if (t.done && !claimed.includes(t.id)) await this.store.claimTask(userId, day, t.id, t.reward);
     const season = await this.season(userId, day);
-    const [wallet, heroes] = await Promise.all([this.store.wallet(userId), this.heroes(userId)]);
-    return { ...wallet, heroes, tasks, season };
+    const [wallet, heroes, rooms] = await Promise.all([this.store.wallet(userId), this.heroes(userId), this.rooms(userId)]);
+    return { ...wallet, heroes, rooms, tasks, season };
+  }
+
+  // A room opens once the room before it is survived to 20:00.
+  async rooms(userId: number): Promise<RoomInfo[]> {
+    const won = await this.store.wonRooms(userId);
+    return cats.ROOM_IDS.map((id) => {
+      const after = cats.ROOMS[id].after;
+      return { id, owned: !after || won.includes(after) };
+    });
   }
 
   // Which cats the player has: bought ones are items, the others open by

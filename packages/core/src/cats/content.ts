@@ -2,7 +2,23 @@
 // level up to 8, passives up to 5, and passives change the cat's stats that
 // every weapon reads. Numbers are tuned with `npm run balance:cats`.
 
-export type EnemyKind = 'mouse' | 'dust' | 'robot' | 'bigrobot' | 'mop' | 'cleaner';
+export type EnemyKind =
+  | 'mouse'
+  | 'dust'
+  | 'robot'
+  | 'bigrobot'
+  | 'mop'
+  | 'pigeon'
+  | 'dog'
+  | 'mower'
+  | 'bulldog'
+  | 'blower'
+  | 'hose'
+  | 'washer'
+  | 'minibot'
+  | 'industrial'
+  | 'king'
+  | 'cleaner';
 
 export interface EnemyDef {
   name: string;
@@ -11,22 +27,110 @@ export interface EnemyDef {
   speed: number;
   dmg: number;
   xp: number;
-  // How it moves: straight at the cat, or charging along a line it picked.
-  move: 'chase' | 'charge';
+  // How it moves: straight at the cat; charging along a line it picked;
+  // flying across the screen in a flock; dashing at the cat when close;
+  // or following the segment ahead of it (the hose).
+  move: 'chase' | 'charge' | 'flock' | 'dash' | 'follow';
 }
 
-// Modelled on Mad Forest at about 70% of its health and damage: mice are
-// bats (weak, the fastest chasers), dust is zombies and skeletons, robots
-// are mudmen that charge, the big robot is the Mantichana-type elite.
+// Health is about 40% of the design table (as in the flat: mice 4 for 10),
+// elites and bosses are per cat level or fixed like the mop.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
+  // Квартира, modelled on Mad Forest at about 70% of its health and damage:
+  // mice are bats (weak, the fastest chasers), dust is zombies and skeletons,
+  // robots are mudmen that charge, the big robot is the Mantichana-type elite.
   mouse: { name: 'Мышь', r: 10, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
   dust: { name: 'Комок пыли', r: 13, hp: 10, speed: 65, dmg: 7, xp: 1.5, move: 'chase' },
   robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 125, dmg: 7, xp: 2.5, move: 'charge' },
   bigrobot: { name: 'Большой робот', r: 30, hp: 60, speed: 75, dmg: 10, xp: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },
+  // Двор, like the Library: flocks sweep across, dogs lunge, mowers are tanks.
+  pigeon: { name: 'Голубь', r: 11, hp: 5, speed: 120, dmg: 4, xp: 1, move: 'flock' },
+  dog: { name: 'Пёс', r: 16, hp: 20, speed: 72, dmg: 6, xp: 2, move: 'dash' },
+  mower: { name: 'Газонокосилка', r: 24, hp: 60, speed: 50, dmg: 12, xp: 4, move: 'chase' },
+  bulldog: { name: 'Бульдог', r: 30, hp: 80, speed: 80, dmg: 10, xp: 0, move: 'dash' }, // hp per cat level
+  blower: { name: 'Листодув', r: 40, hp: 18000, speed: 80, dmg: 35, xp: 0, move: 'chase' },
+  // Склад пылесосов, like the Gallo Tower: a hose snakes, washers leave
+  // slippery water, minibots come in swarms.
+  hose: { name: 'Шланг', r: 12, hp: 12, speed: 80, dmg: 4, xp: 1.5, move: 'follow' },
+  washer: { name: 'Моющий пылесос', r: 20, hp: 48, speed: 60, dmg: 7, xp: 3, move: 'chase' },
+  minibot: { name: 'Мини-робот', r: 7, hp: 3, speed: 105, dmg: 3, xp: 1, move: 'chase' },
+  industrial: { name: 'Промышленный пылесос', r: 34, hp: 120, speed: 60, dmg: 12, xp: 0, move: 'chase' }, // hp per cat level
+  king: { name: 'Король пылесосов', r: 44, hp: 36000, speed: 70, dmg: 40, xp: 0, move: 'chase' },
   // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
   cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 230, dmg: 99999, xp: 0, move: 'chase' },
-  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },
 };
+
+export type RoomId = 'flat' | 'yard' | 'warehouse';
+
+// The three rooms, like the first maps of VS: own enemies, elite and boss,
+// and a shape (endless, a strip between fences, a closed hall).
+export interface RoomDef {
+  name: string;
+  shape: 'open' | 'strip' | 'hall';
+  // Enemy mix by minute: weights of each kind.
+  waves: { from: number; mix: Partial<Record<EnemyKind, number>> }[];
+  elite: EnemyKind; // at 5, 10 and 15 minutes, with a chest
+  miniElite: EnemyKind; // a giant one of these in between, also with a chest
+  boss: EnemyKind; // at 18 minutes
+  minion: EnemyKind; // what the boss calls in
+  // Opened by surviving the room before it to 20:00.
+  after: RoomId | null;
+}
+
+export const ROOMS: Record<RoomId, RoomDef> = {
+  flat: {
+    name: 'Квартира',
+    shape: 'open',
+    waves: [
+      { from: 0, mix: { mouse: 1 } },
+      { from: 3, mix: { mouse: 0.7, dust: 0.3 } },
+      { from: 6, mix: { mouse: 0.5, dust: 0.42, robot: 0.08 } },
+      { from: 10, mix: { mouse: 0.4, dust: 0.45, robot: 0.15 } },
+      { from: 15, mix: { mouse: 0.35, dust: 0.4, robot: 0.25 } },
+    ],
+    elite: 'bigrobot',
+    miniElite: 'dust',
+    boss: 'mop',
+    minion: 'dust',
+    after: null,
+  },
+  yard: {
+    name: 'Двор',
+    shape: 'strip',
+    waves: [
+      { from: 0, mix: { pigeon: 1 } },
+      { from: 3, mix: { pigeon: 0.6, dog: 0.4 } },
+      { from: 6, mix: { pigeon: 0.45, dog: 0.45, mower: 0.1 } },
+      { from: 10, mix: { pigeon: 0.4, dog: 0.4, mower: 0.2 } },
+      // The last minutes bring the flat's enemies too.
+      { from: 15, mix: { pigeon: 0.3, dog: 0.3, mower: 0.15, mouse: 0.1, dust: 0.1, robot: 0.05 } },
+    ],
+    elite: 'bulldog',
+    miniElite: 'dog',
+    boss: 'blower',
+    minion: 'pigeon',
+    after: 'flat',
+  },
+  warehouse: {
+    name: 'Склад пылесосов',
+    shape: 'hall',
+    waves: [
+      { from: 0, mix: { minibot: 1 } },
+      { from: 3, mix: { minibot: 0.6, hose: 0.4 } },
+      { from: 6, mix: { minibot: 0.45, hose: 0.4, washer: 0.15 } },
+      { from: 10, mix: { minibot: 0.4, hose: 0.35, washer: 0.25 } },
+      { from: 15, mix: { minibot: 0.3, hose: 0.25, washer: 0.2, dog: 0.1, mower: 0.05, robot: 0.1 } },
+    ],
+    elite: 'industrial',
+    miniElite: 'washer',
+    boss: 'king',
+    minion: 'minibot',
+    after: 'yard',
+  },
+};
+export const ROOM_IDS = Object.keys(ROOMS) as RoomId[];
+export const isRoom = (id: unknown): id is RoomId => typeof id === 'string' && Object.hasOwn(ROOMS, id);
 
 // The cat's stats. Weapons read them, passives and the hero change them.
 export interface Stats {

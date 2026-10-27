@@ -2,6 +2,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import type { GameEvent } from './stats.ts';
+import type { cats } from '@otryad/core';
 import {
   type Activity,
   type BuyResult,
@@ -80,15 +81,20 @@ export class PgStore implements Store {
   async createRun(userId: number, n: NewRun): Promise<StoredRun> {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${RUN_COLUMNS}`,
-        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik'],
+        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero, room)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${RUN_COLUMNS}`,
+        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik', n.room ?? 'flat'],
       );
       return toRun(rows[0]);
     } catch (e) {
       if ((e as { constraint?: string }).constraint === 'cat_runs_daily_once') throw new DailyTakenError();
       throw e;
     }
+  }
+
+  async wonRooms(userId: number): Promise<cats.RoomId[]> {
+    const { rows } = await this.pool.query<{ room: cats.RoomId }>('SELECT DISTINCT room FROM cat_runs WHERE user_id = $1 AND won', [userId]);
+    return rows.map((r) => r.room);
   }
 
   async recentRuns(limit: number): Promise<RecentRun[]> {
@@ -374,7 +380,7 @@ export class PgStore implements Store {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUN_COLUMNS =
-  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, started_at, finished_at, won, ticks, kills, level, points, record";
+  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, room, started_at, finished_at, won, ticks, kills, level, points, record";
 const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
 
 interface ScoreSqlRow {
@@ -396,6 +402,7 @@ function toRun(row: {
   duel_code: string | null;
   aura: string | null;
   hero: StoredRun['hero'];
+  room: StoredRun['room'];
   started_at: Date;
   finished_at: Date | null;
   won: boolean;
@@ -414,6 +421,7 @@ function toRun(row: {
     duelCode: row.duel_code,
     aura: row.aura,
     hero: row.hero,
+    room: row.room,
     startedAt: row.started_at.getTime(),
     finished: row.finished_at !== null,
     won: row.won,

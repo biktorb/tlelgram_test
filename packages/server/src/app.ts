@@ -74,7 +74,7 @@ export async function buildApp(
     return { current: await game.current(u.id) };
   });
 
-  app.post<{ Body: { mode?: unknown; duel?: unknown; hero?: unknown } | null }>('/api/runs', async (req) => {
+  app.post<{ Body: { mode?: unknown; duel?: unknown; hero?: unknown; room?: unknown } | null }>('/api/runs', async (req) => {
     const u = user(req);
     const mode = req.body?.mode ?? 'free';
     if (mode !== 'free' && mode !== 'daily' && mode !== 'duel') throw new GameError(400, 'Неизвестный режим');
@@ -82,8 +82,10 @@ export async function buildApp(
     if (duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     const hero = req.body?.hero ?? 'ryzhik';
     if (!cats.isHero(hero)) throw new GameError(400, 'Неизвестный кот');
+    const room = req.body?.room ?? 'flat';
+    if (!cats.isRoom(room)) throw new GameError(400, 'Неизвестная комната');
     await store.upsertUser(u.id, u.first_name, u.username);
-    return game.start(u.id, u.first_name || 'Игрок', mode, duel, req.auth!.chatInstance ?? null, hero);
+    return game.start(u.id, u.first_name || 'Игрок', mode, duel, req.auth!.chatInstance ?? null, hero, room);
   });
 
   // Saves the input so far; the run can be continued later.
@@ -141,7 +143,7 @@ export async function buildApp(
       runs.map(async (r) => {
         let a = insights.get(r.id);
         if (!a) {
-          a = r.record ? analyze(r.seed, r.record, r.hero).catch(() => null) : Promise.resolve(null);
+          a = r.record ? analyze(r.seed, r.record, { hero: r.hero, room: r.room }).catch(() => null) : Promise.resolve(null);
           insights.set(r.id, a);
           if (insights.size > 1000) insights.delete(insights.keys().next().value!);
         }

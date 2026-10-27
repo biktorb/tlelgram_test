@@ -1,6 +1,6 @@
-import { EVOLUTIONS, isPassive, type CardId, type HeroId } from './content.ts';
+import { ENEMIES, EVOLUTIONS, isPassive, type CardId } from './content.ts';
 import { dirFromVector, Recorder } from './record.ts';
-import { CatRun, DIR_VECTORS } from './sim.ts';
+import { CatRun, DIR_VECTORS, type RunOptions } from './sim.ts';
 
 // A simple player for balance checks and tests: runs from nearby enemies,
 // picks up gems when it is safe, and takes upgrades by a fixed preference.
@@ -74,9 +74,13 @@ export function botMove(run: CatRun, style: BotStyle): number {
       if (d > 400) continue;
       // Where the enemy will be by then.
       const move = Math.min(d, en.speed * LOOK);
-      const charge = en.vx !== 0 || en.vy !== 0;
-      const ex = en.x + (charge ? en.vx * en.speed * LOOK : (dx / d) * move);
-      const ey = en.y + (charge ? en.vy * en.speed * LOOK : (dy / d) * move);
+      // Chargers and flocks keep their line; a dog keeps it while it lunges.
+      const kind = ENEMIES[en.kind].move;
+      const dash = kind === 'dash' && en.timer > 0;
+      const charge = kind === 'charge' || kind === 'flock' || dash;
+      const speed = dash ? en.speed * 2.2 : en.speed;
+      const ex = en.x + (charge ? en.vx * speed * LOOK : (dx / d) * move);
+      const ey = en.y + (charge ? en.vy * speed * LOOK : (dy / d) * move);
       dx = qx - ex;
       dy = qy - ey;
       d = Math.sqrt(dx * dx + dy * dy);
@@ -125,9 +129,9 @@ export const BOT_SKILLS: Record<'sharp' | 'casual' | 'slow', BotSkill> = {
 };
 
 // Plays a whole run and returns its record.
-export function playBot(seed: number, style: BotStyle, skill: BotSkill, hero?: HeroId): Recorder {
+export function playBot(seed: number, style: BotStyle, skill: BotSkill, opts: RunOptions = {}): Recorder {
   const s = { ...style, fear: skill.fear };
-  const rec = new Recorder(new CatRun(seed, { events: false, hero }));
+  const rec = new Recorder(new CatRun(seed, { ...opts, events: false }));
   let dir = 0;
   while (!rec.run.over) {
     if (rec.run.pending) rec.choose(botPick(rec.run, s));

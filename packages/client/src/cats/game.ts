@@ -23,6 +23,7 @@ export interface GameOptions {
   progress?: RunRecord; // input of an unfinished run, to continue it
   hero?: cats.HeroId; // the player's cat
   ghostHero?: cats.HeroId; // the cat the ghost played
+  room?: cats.RoomId; // the ghost plays the same room
 }
 
 interface Particle {
@@ -72,8 +73,8 @@ class Ghost {
   private picks: string;
   private i = 0;
   private pick = 0;
-  constructor(seed: number, rec: RunRecord, hero?: cats.HeroId) {
-    this.run = new CatRun(seed, { events: false, hero });
+  constructor(seed: number, rec: RunRecord, hero?: cats.HeroId, room?: cats.RoomId) {
+    this.run = new CatRun(seed, { events: false, hero, room });
     this.dirs = decodeMoves(rec.moves);
     this.picks = rec.picks;
   }
@@ -89,13 +90,45 @@ class Ghost {
   }
 }
 
-const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = { mouse: 'mouse', dust: 'dust', robot: 'vacuum', bigrobot: 'vacuum', mop: 'boss', cleaner: 'cleaner' };
+const ENEMY_SPRITE: Record<cats.EnemyKind, SpriteId> = {
+  mouse: 'mouse',
+  dust: 'dust',
+  robot: 'vacuum',
+  bigrobot: 'vacuum',
+  mop: 'boss',
+  pigeon: 'pigeon',
+  dog: 'dog',
+  mower: 'mower',
+  bulldog: 'bulldog',
+  blower: 'blower',
+  hose: 'hose',
+  washer: 'washer',
+  minibot: 'minibot',
+  industrial: 'industrial',
+  king: 'king',
+  cleaner: 'cleaner',
+};
+// The floor of each room: two checker colours and the line between tiles.
+const FLOORS: Record<cats.RoomId, [string, string, string]> = {
+  flat: ['#e9dcc6', '#dfcfb4', 'rgba(120, 90, 60, .18)'],
+  yard: ['#a9d38b', '#9fcb80', 'rgba(60, 110, 40, .15)'],
+  warehouse: ['#c9ccd3', '#bfc3cb', 'rgba(70, 76, 90, .2)'],
+};
+const BOSS_TEXT: Record<cats.RoomId, [string, string]> = {
+  flat: ['Идёт Швабра!', 'Швабра сломана!'],
+  yard: ['Идёт Листодув!', 'Листодув заглох!'],
+  warehouse: ['Идёт Король пылесосов!', 'Король свергнут!'],
+};
 const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟', chest: '🎁' };
 const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟', chest: '' };
 const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
   sofa: ['#6f8fc9', '#8eaadb', '#46639a'],
   table: ['#b07a4a', '#c99563', '#7d5230'],
   wardrobe: ['#8a5a3b', '#a2714f', '#5e3a22'],
+  flowerbed: ['#8a5a3b', '#e86f8f', '#5e3a22'],
+  bench: ['#c98a4b', '#e0a668', '#7d5230'],
+  car: ['#4f7fd0', '#a9c6f0', '#2f4f8a'],
+  shelf: ['#8a6a4a', '#d7b98a', '#5a4430'],
 };
 const VIEW_RADIUS = 470; // world units from the cat to the nearest screen edge, at most
 
@@ -140,9 +173,9 @@ export class Game {
     this.cv = cv;
     this.ctx = cv.getContext('2d')!;
     this.hooks = hooks;
-    const hero = opts.hero;
-    this.rec = opts.progress ? resume(seed, opts.progress, { hero }) : new Recorder(new CatRun(seed, { hero }));
-    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost, opts.ghostHero) : null;
+    const { hero, room } = opts;
+    this.rec = opts.progress ? resume(seed, opts.progress, { hero, room }) : new Recorder(new CatRun(seed, { hero, room }));
+    this.ghost = opts.ghost ? new Ghost(seed, opts.ghost, opts.ghostHero, room) : null;
     // The ghost catches up with a continued run: one ghost step per tick played.
     for (let i = 0; i < this.run.tick; i++) this.ghost?.step();
     this.prevPlayer = [this.run.player.x, this.run.player.y];
@@ -322,12 +355,18 @@ export class Game {
       case 'hit':
         this.text(e.x, e.y, String(Math.round(e.dmg)), '#ffffff', 13);
         break;
-      case 'kill':
-        this.burst(e.x, e.y, e.kind === 'mop' ? 40 : e.elite ? 18 : 6, e.kind === 'mop' ? '#ffcf3f' : '#d8dcef');
-        if (e.kind === 'mop') {
+      case 'kill': {
+        const boss = e.kind === cats.ROOMS[this.run.room].boss;
+        this.burst(e.x, e.y, boss ? 40 : e.elite ? 18 : 6, boss ? '#ffcf3f' : '#d8dcef');
+        if (boss) {
           this.shake = 22;
-          this.text(e.x, e.y - 50, 'Швабра сломана!', '#ffcf3f', 24);
+          this.text(e.x, e.y - 50, BOSS_TEXT[this.run.room][1], '#ffcf3f', 24);
         }
+        break;
+      }
+      case 'wind':
+        this.text(this.run.player.x, this.run.player.y - 60, 'Ветер!', '#7fbf6a', 22);
+        this.shake = Math.max(this.shake, 6);
         break;
       case 'hurt':
         this.hurt = 0.25;
@@ -338,7 +377,7 @@ export class Game {
         this.burst(this.run.player.x, this.run.player.y, 18, '#8e7bff');
         break;
       case 'boss':
-        this.text(this.run.player.x, this.run.player.y - 70, 'Идёт Швабра!', '#ff6b6b', 30);
+        this.text(this.run.player.x, this.run.player.y - 70, BOSS_TEXT[this.run.room][0], '#ff6b6b', 30);
         this.shake = 12;
         break;
       case 'cleaner':
@@ -346,7 +385,7 @@ export class Game {
         this.shake = 16;
         break;
       case 'elite':
-        this.text(this.run.player.x, this.run.player.y - 70, 'Большой робот!', '#ff9f43', 24);
+        this.text(this.run.player.x, this.run.player.y - 70, `${cats.ENEMIES[cats.ROOMS[this.run.room].elite].name}!`, '#ff9f43', 24);
         break;
       case 'pickup':
         this.text(this.run.player.x, this.run.player.y - 40, PICKUP_TEXT[e.kind], '#ffe08a', 18);
@@ -453,7 +492,23 @@ export class Game {
         else c.roundRect(f.x + 10, f.y + 8 + (i * (f.h - 16)) / n, f.w - 18, (f.h - 16) / n - 4, 6);
         c.fill();
       }
-    } else if (f.kind === 'table') {
+    } else if (f.kind === 'shelf') {
+      // Boxes on the shelf.
+      for (let x = f.x + 8; x + 30 < f.x + f.w; x += 38) c.fillRect(x, f.y + 7, 30, f.h - 14);
+    } else if (f.kind === 'car') {
+      c.beginPath();
+      c.roundRect(f.x + f.w * 0.25, f.y + 10, f.w * 0.5, f.h - 20, 8);
+      c.fill();
+    } else if (f.kind === 'flowerbed') {
+      // Flowers in rows.
+      for (let x = f.x + 14; x < f.x + f.w - 8; x += 22) {
+        for (let y = f.y + 16; y < f.y + f.h - 8; y += 20) {
+          c.beginPath();
+          c.arc(x, y, 6, 0, Math.PI * 2);
+          c.fill();
+        }
+      }
+    } else if (f.kind === 'table' || f.kind === 'bench') {
       c.beginPath();
       c.roundRect(f.x + 8, f.y + 8, f.w - 16, f.h - 16, 6);
       c.fill();
@@ -474,17 +529,60 @@ export class Game {
     }
   }
 
+  // The yard's fences, the warehouse walls and its conveyor belts.
+  private drawWalls(px: number, py: number, view: number, t: number): void {
+    const c = this.ctx;
+    const map = this.run.map;
+    for (const b of map.belts) {
+      if (b.y > py + view || b.y + b.h < py - view) continue;
+      const x0 = Math.max(b.x, px - view);
+      const x1 = Math.min(b.x + b.w, px + view);
+      c.fillStyle = '#9097a3';
+      c.fillRect(x0, b.y, x1 - x0, b.h);
+      // Chevrons that run with the belt.
+      c.strokeStyle = 'rgba(255, 255, 255, .25)';
+      c.lineWidth = 4;
+      const dir = Math.sign(b.vx);
+      const shift = (((t * b.vx) % 60) + 60) % 60;
+      c.beginPath();
+      for (let x = Math.floor(x0 / 60) * 60 + shift; x < x1; x += 60) {
+        c.moveTo(x - dir * 10, b.y + b.h * 0.25);
+        c.lineTo(x + dir * 10, b.y + b.h * 0.5);
+        c.lineTo(x - dir * 10, b.y + b.h * 0.75);
+      }
+      c.stroke();
+    }
+    const bd = map.bounds;
+    if (!bd) return;
+    c.fillStyle = map.shape === 'strip' ? '#b98a5a' : '#6d717c';
+    const big = view * 2 + 200;
+    // Everything beyond the walls is filled.
+    if (bd.minY > py - view) c.fillRect(px - view, bd.minY - big, view * 2, big);
+    if (bd.maxY < py + view) c.fillRect(px - view, bd.maxY, view * 2, big);
+    if (bd.minX > px - view) c.fillRect(bd.minX - big, py - view, big, view * 2);
+    if (bd.maxX < px + view) c.fillRect(bd.maxX, py - view, big, view * 2);
+    if (map.shape === 'strip') {
+      // Fence posts.
+      c.fillStyle = '#8a5f37';
+      for (let x = Math.floor((px - view) / 40) * 40; x < px + view; x += 40) {
+        c.fillRect(x, bd.minY - 26, 10, 26);
+        c.fillRect(x, bd.maxY, 10, 26);
+      }
+    }
+  }
+
   private floorPattern(): CanvasPattern {
     if (this.floor) return this.floor;
     const t = document.createElement('canvas');
     t.width = t.height = 128;
     const c = t.getContext('2d')!;
-    c.fillStyle = '#e9dcc6';
+    const [light, dark, line] = FLOORS[this.run.room];
+    c.fillStyle = light;
     c.fillRect(0, 0, 128, 128);
-    c.fillStyle = '#dfcfb4';
+    c.fillStyle = dark;
     c.fillRect(0, 0, 64, 64);
     c.fillRect(64, 64, 64, 64);
-    c.strokeStyle = 'rgba(120, 90, 60, .18)';
+    c.strokeStyle = line;
     c.lineWidth = 2;
     c.strokeRect(0, 0, 64, 64);
     c.strokeRect(64, 64, 64, 64);
@@ -527,8 +625,23 @@ export class Game {
       c.stroke();
     }
 
+    const view = (Math.max(this.W, this.H) / 2) * z + 140;
+    this.drawWalls(px, py, view, t);
+
     // Furniture: a shadow, the body and a lighter top.
-    for (const f of run.map.near(px, py, (Math.max(this.W, this.H) / 2) * z + 140, this.furniture)) this.drawFurniture(f);
+    for (const f of run.map.near(px, py, view, this.furniture)) this.drawFurniture(f);
+
+    // Water left by washers, and the blower's leaves.
+    for (const h of run.hazards) {
+      if (h.kind === 'puddle') {
+        c.globalAlpha = Math.min(1, h.life / 20) * 0.45;
+        c.fillStyle = '#4fa3e8';
+        c.beginPath();
+        c.ellipse(h.x, h.y, h.r, h.r * 0.75, 0, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+    c.globalAlpha = 1;
 
     // Puddles from the glass, under everything.
     for (const zn of run.zones) {
@@ -545,6 +658,7 @@ export class Game {
     c.textBaseline = 'middle';
     c.font = '22px system-ui, sans-serif';
     for (const it of run.pickups) c.fillText(PICKUP_ICON[it.kind], it.x, it.y + Math.sin(t * 4 + it.id) * 2);
+    for (const h of run.hazards) if (h.kind === 'leaf') c.fillText('🍂', h.x, h.y);
     c.textBaseline = 'alphabetic';
 
     // Shadows first, then bodies, so crowds read clearly.

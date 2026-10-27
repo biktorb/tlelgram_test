@@ -1,13 +1,16 @@
 // Balance check for «Коты против пылесосов»: bots of three skill levels play
 // full runs, and the table shows how long they last and when the build is full.
-// Usage: node tools/cats-balance.ts [runs per cell] [cat|all]
+// Usage: node tools/cats-balance.ts [runs per cell] [cat|all] [room|all]
 import { cats } from '../packages/core/src/index.ts';
 
-const { BOT_SKILLS, BOT_STYLES, HERO_IDS, TICK_RATE, isHero, isWeapon, playBot } = cats;
+const { BOT_SKILLS, BOT_STYLES, HERO_IDS, ROOM_IDS, TICK_RATE, isHero, isRoom, isWeapon, playBot } = cats;
 const RUNS = Number(process.argv[2] ?? 8);
 const arg = process.argv[3] ?? 'ryzhik';
 const heroes = arg === 'all' ? HERO_IDS : isHero(arg) ? [arg] : [];
 if (!heroes.length) throw new Error(`unknown cat: ${arg}`);
+const roomArg = process.argv[4] ?? 'flat';
+const rooms = roomArg === 'all' ? ROOM_IDS : isRoom(roomArg) ? [roomArg] : [];
+if (!rooms.length) throw new Error(`unknown room: ${roomArg}`);
 
 function pct(xs: number[], p: number): number {
   const s = xs.slice().sort((a, b) => a - b);
@@ -15,9 +18,9 @@ function pct(xs: number[], p: number): number {
 }
 const mmss = (sec: number) => (sec === Infinity ? '—' : `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`);
 
-console.log(`| Кот | Бот | Стиль | Медиана | 10% худших | Побед | Уровень | Оружия на 8 | Эволюций | Полная сборка (медиана) |`);
-console.log(`|---|---|---|---|---|---|---|---|---|---|`);
-for (const hero of heroes) {
+console.log(`| Комната | Кот | Бот | Стиль | Медиана | 10% худших | Побед | Уровень | Оружия на 8 | Эволюций | Полная сборка (медиана) |`);
+console.log(`|---|---|---|---|---|---|---|---|---|---|---|`);
+for (const room of rooms) for (const hero of heroes) {
   for (const [skillName, skill] of Object.entries(BOT_SKILLS)) {
     for (const [styleName, style] of Object.entries(BOT_STYLES)) {
       const times: number[] = [];
@@ -27,7 +30,7 @@ for (const hero of heroes) {
       const evos: number[] = [];
       let wins = 0;
       for (let i = 0; i < RUNS; i++) {
-        const run = playBot(1000 + i, style, skill, hero).run;
+        const run = playBot(1000 + i, style, skill, { hero, room }).run;
         times.push(run.tick / TICK_RATE);
         levels.push(run.level);
         maxed.push(run.weapons().filter((w) => isWeapon(w) && run.lvl(w) >= 8).length);
@@ -36,7 +39,7 @@ for (const hero of heroes) {
         if (run.won) wins++;
       }
       console.log(
-        `| ${cats.HEROES[hero].name} | ${skillName} | ${styleName} | ${mmss(pct(times, 0.5))} | ${mmss(pct(times, 0.1))} | ${Math.round((100 * wins) / RUNS)}% | ${pct(levels, 0.5)} | ${pct(maxed, 0.5)} | ${pct(evos, 0.5)} | ${mmss(pct(full, 0.5))} |`,
+        `| ${cats.ROOMS[room].name} | ${cats.HEROES[hero].name} | ${skillName} | ${styleName} | ${mmss(pct(times, 0.5))} | ${mmss(pct(times, 0.1))} | ${Math.round((100 * wins) / RUNS)}% | ${pct(levels, 0.5)} | ${pct(maxed, 0.5)} | ${pct(evos, 0.5)} | ${mmss(pct(full, 0.5))} |`,
       );
     }
   }
