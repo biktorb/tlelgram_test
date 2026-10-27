@@ -5,19 +5,21 @@ import type { RunRecord } from './store.ts';
 
 export type RunResult = ReturnType<cats.CatRun['result']>;
 // Replays a record and returns what the run achieved; throws on a bad record.
-export type Replayer = (seed: number, rec: RunRecord, hero?: cats.HeroId) => Promise<RunResult>;
+// The cat and the room the run was played with.
+export type RunSetup = { hero?: cats.HeroId; room?: cats.RoomId };
+export type Replayer = (seed: number, rec: RunRecord, setup?: RunSetup) => Promise<RunResult>;
 
 // In the same thread: for tests and the in-memory dev server.
-export const replayHere: Replayer = async (seed, rec, hero) => cats.replay(seed, rec, { hero }).result();
+export const replayHere: Replayer = async (seed, rec, setup) => cats.replay(seed, rec, { ...setup }).result();
 
 // Replays a record with events to see how the run went, for the admin page.
-export type Analyzer = (seed: number, rec: RunRecord, hero?: cats.HeroId) => Promise<cats.RunInsight>;
-export const analyzeHere: Analyzer = async (seed, rec, hero) => cats.analyze(seed, rec, hero);
+export type Analyzer = (seed: number, rec: RunRecord, setup?: RunSetup) => Promise<cats.RunInsight>;
+export const analyzeHere: Analyzer = async (seed, rec, setup) => cats.analyze(seed, rec, { ...setup });
 
 interface Job {
   seed: number;
   rec: RunRecord;
-  hero?: cats.HeroId;
+  setup?: RunSetup;
   analyze: boolean;
   resolve: (r: never) => void;
   reject: (e: Error) => void;
@@ -35,7 +37,7 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
       const w = idle.pop()!;
       const job = queue.shift()!;
       busy.set(w, job);
-      w.postMessage({ seed: job.seed, rec: job.rec, hero: job.hero, analyze: job.analyze });
+      w.postMessage({ seed: job.seed, rec: job.rec, setup: job.setup, analyze: job.analyze });
     }
   };
   const spawn = () => {
@@ -64,9 +66,9 @@ export function workerReplayer(size = Math.max(1, Math.min(4, availableParalleli
 
   const job =
     <T>(analyze: boolean) =>
-    (seed: number, rec: RunRecord, hero?: cats.HeroId) =>
+    (seed: number, rec: RunRecord, setup?: RunSetup) =>
       new Promise<T>((resolve, reject) => {
-        queue.push({ seed, rec, hero, analyze, resolve, reject });
+        queue.push({ seed, rec, setup, analyze, resolve, reject });
         pump();
       });
   return Object.assign(job<RunResult>(false), {

@@ -22,6 +22,7 @@ export interface StoredRun extends RunOutcome {
   duelCode: string | null; // the duel this run answers
   aura: string | null;
   hero: cats.HeroId;
+  room: cats.RoomId;
   startedAt: number; // ms
   finished: boolean;
   record: RunRecord | null; // the progress saved so far; the final input once finished
@@ -40,6 +41,7 @@ export interface NewRun {
   chatInstance?: string | null;
   aura?: string | null;
   hero?: cats.HeroId;
+  room?: cats.RoomId;
 }
 
 // A finished run another player races against.
@@ -47,6 +49,7 @@ export interface Ghost {
   name: string;
   aura: string | null;
   hero: cats.HeroId;
+  room: cats.RoomId;
   seed: number;
   record: RunRecord;
   won: boolean;
@@ -148,6 +151,8 @@ export interface Store {
   saveProgress(runId: string, record: RunRecord): Promise<boolean>;
   // Saves the result once; false when the run was already finished.
   finishRun(runId: string, outcome: RunOutcome, record: RunRecord): Promise<boolean>;
+  // Rooms the player has survived to 20:00 at least once.
+  wonRooms(userId: number): Promise<cats.RoomId[]>;
   // The latest finished runs of everyone, newest first, for the admin page.
   recentRuns(limit: number): Promise<RecentRun[]>;
   dailyRun(userId: number, date: string): Promise<StoredRun | null>;
@@ -229,6 +234,7 @@ export class MemoryStore implements Store {
       duelCode: n.duelCode ?? null,
       aura: n.aura ?? null,
       hero: n.hero ?? 'ryzhik',
+      room: n.room ?? 'flat',
       startedAt: Date.now(),
       finished: false,
       record: null,
@@ -266,6 +272,10 @@ export class MemoryStore implements Store {
     if (!r || r.finished) return false;
     Object.assign(r, outcome, { finished: true, record: { ...record }, finishedAt: Date.now() + ++this.seq / 1000 });
     return true;
+  }
+
+  async wonRooms(userId: number): Promise<cats.RoomId[]> {
+    return [...new Set([...this.runs.values()].filter((r) => r.userId === userId && r.finished && r.won).map((r) => r.room))];
   }
 
   async recentRuns(limit: number): Promise<RecentRun[]> {
@@ -450,7 +460,7 @@ function toStored(r: MemRun): StoredRun {
 }
 
 export function ghostOf(r: StoredRun, name: string): Ghost {
-  return { name, aura: r.aura, hero: r.hero, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
+  return { name, aura: r.aura, hero: r.hero, room: r.room, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
 }
 
 function toEntry({ userId, week, league, moved, points, day, dayRuns }: LeagueEntry): LeagueEntry {

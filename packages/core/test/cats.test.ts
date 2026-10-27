@@ -223,10 +223,10 @@ test('every cat starts with its weapon and stats, and its bonus grows', () => {
 });
 
 test('a record replays the same with the same cat', () => {
-  const bot = cats.playBot(3, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, 'murka');
+  const bot = cats.playBot(3, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, { hero: 'murka' });
   const rec = bot.record();
   assert.deepEqual(cats.replay(3, rec, { hero: 'murka' }).result(), bot.run.result());
-  assert.equal(cats.analyze(3, rec, 'murka').kills, bot.run.kills);
+  assert.equal(cats.analyze(3, rec, { hero: 'murka' }).kills, bot.run.kills);
 });
 
 // Gives a run levels by feeding it experience and taking the first card.
@@ -249,4 +249,27 @@ test('an item never goes past its last level, even when a chest maxed it while c
   assert.equal(run.fish, fish + 10);
   run.step(0);
   assert.equal(run.over, false);
+});
+
+test('every room plays with its own enemies, walls and boss, and replays the same', () => {
+  for (const room of cats.ROOM_IDS) {
+    const bot = cats.playBot(7, cats.BOT_STYLES.mixed, cats.BOT_SKILLS.casual, { room });
+    const run = bot.run;
+    assert.equal(run.room, room);
+    assert.deepEqual(cats.replay(7, bot.record(), { room }).result(), run.result(), room);
+    const b = run.map.bounds;
+    if (b) assert.ok(run.player.y >= b.minY && run.player.y <= b.maxY && run.player.x >= b.minX && run.player.x <= b.maxX, `${room}: the cat stays inside`);
+  }
+  // The yard's enemies come from its own waves.
+  const yard = new cats.CatRun(3, { room: 'yard' });
+  for (let i = 0; i < 90; i++) yard.step(0);
+  assert.ok(yard.enemies.length > 0 && yard.enemies.every((e) => e.kind === 'pigeon'));
+  // A hose comes as a chain of segments.
+  const hall = new cats.CatRun(3, { room: 'warehouse' });
+  for (let i = 0; i < 4 * 60 * 30 && !hall.over; i++) {
+    hall.step(0);
+    hall.player.hp = hall.player.maxHp;
+    while (hall.pending) hall.choose(0);
+  }
+  assert.ok(hall.enemies.some((e) => e.kind === 'hose' && e.leader));
 });

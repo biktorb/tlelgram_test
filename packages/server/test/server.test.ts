@@ -4,7 +4,7 @@ import { cats, SEASON_PASS } from '@otryad/core';
 import { buildApp } from '../src/app.ts';
 import { signInitData, verifyInitData } from '../src/auth.ts';
 import { loadConfig, type Config } from '../src/config.ts';
-import { dailySeed, dayOf, leagueMove, weekOf, type Notifier } from '../src/game.ts';
+import { dailyRoom, dailySeed, dayOf, leagueMove, weekOf, type Notifier } from '../src/game.ts';
 import { PgStore } from '../src/pgStore.ts';
 import { MemoryStore, type Store } from '../src/store.ts';
 import { computeStats, type GameEvent } from '../src/stats.ts';
@@ -176,7 +176,7 @@ for (const [name, makeStore] of stores) {
     const start = async (userId: number, payload: object = {}, headers = auth(userId)) => {
       const res = await post(userId, '/api/runs', payload, headers);
       assert.equal(res.statusCode, 200, res.body);
-      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; hero: string; progress: unknown }; ghost: any };
+      return res.json() as { run: { id: string; seed: number; mode: string; daily: string | null; duel: string | null; hero: string; room: string; progress: unknown }; ghost: any };
     };
     const finish = async (userId: number, runId: string, rec = AFK) => {
       const res = await post(userId, `/api/runs/${runId}/finish`, rec);
@@ -301,7 +301,7 @@ for (const [name, makeStore] of stores) {
       const date = dayOf(now());
       const daily = async (id: number) => (await get(id, '/api/daily')).json().daily;
 
-      assert.deepEqual(await daily(90), { date, status: 'none', top: [], rank: null });
+      assert.deepEqual(await daily(90), { date, room: dailyRoom(date), status: 'none', top: [], rank: null });
       const a = await start(90, { mode: 'daily' });
       assert.equal(a.run.daily, date);
       assert.equal(a.run.seed, dailySeed(date));
@@ -460,7 +460,7 @@ for (const [name, makeStore] of stores) {
 
       const { run } = await start(170, { hero: 'murka' });
       assert.equal(run.hero, 'murka');
-      const bot = cats.playBot(run.seed, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, 'murka');
+      const bot = cats.playBot(run.seed, cats.BOT_STYLES.ranged, cats.BOT_SKILLS.casual, { hero: 'murka' });
       offset = 3600 * 1000;
       const body = await finish(170, run.id, bot.record());
       offset = 0;
@@ -469,6 +469,25 @@ for (const [name, makeStore] of stores) {
       const duel = await start(171, { mode: 'duel', duel: shared.duel.code });
       assert.equal(duel.ghost.hero, 'murka', 'the ghost keeps its cat');
       assert.equal(duel.run.hero, 'ryzhik', 'the friend plays their own cat');
+    });
+
+    test('rooms: the yard opens after a won flat, a duel keeps its room', async () => {
+      const rooms = async (id: number) => (await get(id, '/api/profile')).json().profile.rooms.map((r: { id: string; owned: boolean }) => [r.id, r.owned]);
+      assert.deepEqual(await rooms(180), [['flat', true], ['yard', false], ['warehouse', false]]);
+      assert.equal((await post(180, '/api/runs', { room: 'yard' })).statusCode, 422);
+      assert.equal((await post(180, '/api/runs', { room: 'moon' })).statusCode, 400);
+      const won = await store.createRun(180, { seed: 1, mode: 'free' });
+      await store.finishRun(won.id, { won: true, ticks: cats.RUN_TICKS, kills: 900, level: 30, points: 42 }, AFK);
+      assert.deepEqual(await rooms(180), [['flat', true], ['yard', true], ['warehouse', false]]);
+      const { run } = await start(180, { room: 'yard' });
+      assert.equal(run.room, 'yard');
+      offset = 3600 * 1000;
+      await finish(180, run.id);
+      offset = 0;
+      const shared = (await post(180, `/api/runs/${run.id}/duel`)).json();
+      const duel = await start(181, { mode: 'duel', duel: shared.duel.code });
+      assert.equal(duel.run.room, 'yard', 'a friend plays the challenger’s room even before opening it');
+      assert.equal(duel.ghost.room, 'yard');
     });
 
     test('the runs page replays finished runs for the owner', async () => {

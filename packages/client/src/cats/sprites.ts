@@ -10,7 +10,25 @@
 
 import type { cats } from '@otryad/core';
 
-export type SpriteId = 'cat' | 'mouse' | 'dog' | 'dust' | 'cleaner' | 'vacuum' | 'boss' | 'fish' | 'yarn';
+export type SpriteId =
+  | 'cat'
+  | 'mouse'
+  | 'dog'
+  | 'dust'
+  | 'cleaner'
+  | 'vacuum'
+  | 'boss'
+  | 'fish'
+  | 'yarn'
+  | 'pigeon'
+  | 'bulldog'
+  | 'mower'
+  | 'blower'
+  | 'hose'
+  | 'washer'
+  | 'minibot'
+  | 'industrial'
+  | 'king';
 
 const OUTLINE = '#3b3344';
 type Paint = (c: CanvasRenderingContext2D) => void;
@@ -51,6 +69,20 @@ function eyes(c: CanvasRenderingContext2D, y: number, gap: number, r: number, an
       c.stroke();
     }
   }
+}
+
+// A robot vacuum seen from above, in the given colours.
+function vacuumPaint(body: string, edge: string, top: string): Paint {
+  return (c) => {
+    blob(c, body, () => c.arc(50, 50, 43, 0, Math.PI * 2), 5, edge);
+    c.beginPath();
+    c.arc(50, 50, 40, Math.PI * 1.12, Math.PI * 1.88);
+    c.lineWidth = 8;
+    c.strokeStyle = '#b4bccc';
+    c.stroke();
+    blob(c, top, () => c.arc(50, 56, 25, 0, Math.PI * 2), 3, edge);
+    eyes(c, 54, 10, 6, true);
+  };
 }
 
 const PAINT: Record<SpriteId, Paint> = {
@@ -147,16 +179,71 @@ const PAINT: Record<SpriteId, Paint> = {
     eyes(c, 32, 7, 4, true);
     blob(c, '#9aa4b8', () => c.rect(70, 70, 22, 22), 3, '#5f6879');
   },
-  vacuum(c) {
-    // A robot vacuum seen from above: disc, bumper, sensor eye.
-    blob(c, '#6b7489', () => c.arc(50, 50, 43, 0, Math.PI * 2), 5, '#454c5e');
+  // A robot vacuum seen from above: disc, bumper, sensor eye.
+  vacuum: vacuumPaint('#6b7489', '#454c5e', '#828ba0'),
+  washer: vacuumPaint('#4f8fcf', '#2f5f93', '#8cc4f2'),
+  minibot: vacuumPaint('#c9cf5a', '#868a2e', '#e4e88f'),
+  industrial: vacuumPaint('#c96b3a', '#7e3f1c', '#e79a68'),
+  king(c) {
+    vacuumPaint('#7a5bc4', '#4a3387', '#a58be6')(c);
+    // A crown on top.
+    blob(c, '#ffcf3f', () => {
+      c.moveTo(30, 30);
+      c.lineTo(30, 10);
+      c.lineTo(40, 22);
+      c.lineTo(50, 6);
+      c.lineTo(60, 22);
+      c.lineTo(70, 10);
+      c.lineTo(70, 30);
+      c.closePath();
+    }, 3, '#b8860b');
+  },
+  pigeon(c) {
+    // A grey pigeon from above, wings spread.
+    for (const s of [-1, 1]) blob(c, '#8d95a8', () => c.ellipse(50 + s * 28, 52, 26, 12, s * -0.3, 0, Math.PI * 2), 3, '#5c6375');
+    blob(c, '#a3abbd', () => c.ellipse(50, 54, 18, 26, 0, 0, Math.PI * 2), 3, '#5c6375');
+    blob(c, '#6f9a8f', () => c.arc(50, 32, 13, 0, Math.PI * 2), 3, '#4a6b62');
+    eyes(c, 31, 6, 3.5, true);
     c.beginPath();
-    c.arc(50, 50, 40, Math.PI * 1.12, Math.PI * 1.88);
-    c.lineWidth = 8;
-    c.strokeStyle = '#b4bccc';
+    c.moveTo(46, 40);
+    c.lineTo(54, 40);
+    c.lineTo(50, 47);
+    c.fillStyle = '#e8a64a';
+    c.fill();
+  },
+  bulldog(c) {
+    blob(c, '#d8c7a8', () => c.ellipse(50, 56, 42, 36, 0, 0, Math.PI * 2));
+    for (const s of [-1, 1]) blob(c, '#8a6a4a', () => c.ellipse(50 + s * 34, 28, 12, 10, s * 0.4, 0, Math.PI * 2));
+    blob(c, '#efe3cc', () => c.ellipse(50, 72, 26, 16, 0, 0, Math.PI * 2), 3);
+    eyes(c, 48, 16, 6, true);
+    c.beginPath();
+    c.ellipse(50, 64, 9, 6, 0, 0, Math.PI * 2);
+    c.fillStyle = OUTLINE;
+    c.fill();
+    c.fillStyle = '#fff';
+    for (const s of [-1, 1]) c.fillRect(50 + s * 10 - 2, 76, 4, 6);
+  },
+  mower(c) {
+    // A red lawn mower: body, wheels, handle.
+    for (const [x, y] of [[22, 24], [78, 24], [22, 78], [78, 78]]) blob(c, '#3b3344', () => c.arc(x, y, 11, 0, Math.PI * 2), 2, '#1d1925');
+    blob(c, '#d9473f', () => c.rect(18, 22, 64, 58), 4, '#8f2620');
+    blob(c, '#8a8f99', () => c.arc(50, 51, 18, 0, Math.PI * 2), 3, '#5a5f69');
+    eyes(c, 48, 9, 5, true);
+  },
+  blower(c) {
+    // A leaf blower: engine box and a long nozzle.
+    blob(c, '#4f9f5a', () => c.rect(14, 30, 44, 44), 4, '#2f6a37');
+    blob(c, '#d6d9e0', () => c.rect(56, 44, 38, 16), 3, '#8a8f99');
+    blob(c, '#f2c94c', () => c.rect(20, 18, 32, 12), 3, '#b8860b');
+    eyes(c, 50, -14, 6, true);
+  },
+  hose(c) {
+    blob(c, '#3fa34d', () => c.arc(50, 50, 40, 0, Math.PI * 2), 5, '#25702f');
+    c.beginPath();
+    c.arc(50, 50, 24, 0, Math.PI * 2);
+    c.lineWidth = 5;
+    c.strokeStyle = '#2b8237';
     c.stroke();
-    blob(c, '#828ba0', () => c.arc(50, 56, 25, 0, Math.PI * 2), 3, '#5a6276');
-    eyes(c, 54, 10, 6, true);
   },
   boss(c) {
     // An angry mop: handle, head, strings.

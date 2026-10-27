@@ -9,6 +9,7 @@ const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
 type CardId = cats.CardId;
 type ItemId = cats.ItemId;
 type HeroId = cats.HeroId;
+type RoomId = cats.RoomId;
 type CatRun = InstanceType<typeof cats.CatRun>;
 
 initTelegram();
@@ -23,8 +24,9 @@ let serverRun: Started['run'] | null = null;
 // ---------- saved data (this device) ----------
 interface Saved {
   best?: { ticks: number; kills: number; won: boolean };
-  last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId };
+  last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId; room?: RoomId };
   hero?: HeroId; // the cat picked for the next run
+  room?: RoomId; // and the room
 }
 function load(): Saved {
   try {
@@ -44,6 +46,11 @@ function save(s: Saved): void {
 const chosenHero = (): HeroId => {
   const id = load().hero;
   return id && cats.isHero(id) ? id : 'ryzhik';
+};
+
+const chosenRoom = (): RoomId => {
+  const id = load().room;
+  return id && cats.isRoom(id) ? id : 'flat';
 };
 
 // ---------- helpers ----------
@@ -168,13 +175,18 @@ function menu(): void {
   );
   if (s.best) box.append(h('p', 'best', `Рекорд: ${scoreText(s.best)}`));
   const hero = cats.HEROES[chosenHero()];
-  box.append(button(`🐱 Кот: ${hero.name} · сменить`, 'btn secondary small', () => heroScreen()));
+  const pick = h('div', 'picks');
+  pick.append(
+    button(`🐱 ${hero.name}`, 'btn secondary small', () => heroScreen()),
+    button(`🏠 ${cats.ROOMS[chosenRoom()].name}`, 'btn secondary small', () => roomScreen()),
+  );
+  box.append(pick);
   const buttons = h('div', 'buttons');
   buttons.append(button('Играть', 'btn', () => startServer('free')));
   if (s.last) {
     const last = s.last;
     buttons.append(
-      button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record, ghostHero: last.hero, hero: chosenHero() })),
+      button(`Переживи себя (${mmss(last.ticks)})`, 'btn ghost', () => play(last.seed, { ghost: last.record, ghostHero: last.hero, hero: chosenHero(), room: last.room })),
     );
   }
   box.append(buttons);
@@ -214,11 +226,11 @@ const progressTicks = (rec: RunRecord | null) => (rec ? cats.decodeMoves(rec.mov
 // ---------- playing ----------
 async function startServer(mode: 'free' | 'daily' | 'duel', duel?: string): Promise<void> {
   if (!api) {
-    play((Math.random() * 2 ** 32) >>> 0, { hero: chosenHero() });
+    play((Math.random() * 2 ** 32) >>> 0, { hero: chosenHero(), room: chosenRoom() });
     return;
   }
   try {
-    playServer(await api.start(mode, chosenHero(), duel));
+    playServer(await api.start(mode, chosenHero(), chosenRoom(), duel));
   } catch (e) {
     toast(errorText(e));
   }
@@ -232,6 +244,7 @@ function playServer(s: Started): void {
     progress: s.run.progress ?? undefined,
     ghostName: s.ghost?.name,
     hero: s.run.hero,
+    room: s.run.room,
   });
 }
 
@@ -240,7 +253,7 @@ function saveProgress(): void {
   api.progress(serverRun.id, game.rec.record()).catch(() => {});
 }
 
-function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; ghostName?: string; hero?: HeroId; ghostHero?: HeroId } = {}): void {
+function play(seed: number, opts: { ghost?: RunRecord; progress?: RunRecord; ghostName?: string; hero?: HeroId; ghostHero?: HeroId; room?: RoomId } = {}): void {
   stopGame();
   ui.replaceChildren(hud(opts.ghostName));
   setBack(() => pauseMenu());
@@ -368,7 +381,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   const mine = { won: run.won, ticks: run.tick, kills: run.kills };
   const better = !s.best || cats.compareScores(mine, s.best) < 0;
   if (better) s.best = mine;
-  s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero };
+  s.last = { seed, record, ticks: run.tick, kills: run.kills, hero: run.hero, room: run.room };
   save(s);
 
   const playedRun = serverRun;
@@ -487,11 +500,48 @@ function heroScreen(): void {
   });
 }
 
+// ---------- rooms ----------
+function roomScreen(): void {
+  screen('Комнаты', async (box) => {
+    const render = (list: { id: RoomId; owned: boolean }[]) => {
+      box.replaceChildren(h('p', '', 'Каждая следующая комната открывается, когда вы продержались 20 минут в предыдущей.'));
+      const chosen = chosenRoom();
+      for (const info of list) {
+        const def = cats.ROOMS[info.id];
+        const card = h('div', `herocard${info.id === chosen ? ' on' : ''}`);
+        const text = h('div', 'text');
+        const enemies = [...new Set(def.waves.flatMap((w) => Object.keys(w.mix)))].slice(0, 3) as cats.EnemyKind[];
+        text.append(
+          h('b', '', def.name),
+          h('span', '', `Враги: ${enemies.map((k) => cats.ENEMIES[k].name).join(', ')}`),
+          h('span', '', `Босс: ${cats.ENEMIES[def.boss].name}`),
+        );
+        card.append(text);
+        if (info.id === chosen) card.append(h('span', 'lv', 'выбрана'));
+        else if (info.owned) {
+          card.append(
+            button('Выбрать', 'btn small', () => {
+              save({ ...load(), room: info.id });
+              render(list);
+            }),
+          );
+        } else card.append(h('span', 'lv', `🔒 пройти «${cats.ROOMS[def.after!].name}»`));
+        box.append(card);
+      }
+    };
+    if (!api) {
+      render(cats.ROOM_IDS.map((id) => ({ id, owned: true })));
+      return;
+    }
+    render((await api.profile()).rooms);
+  });
+}
+
 // ---------- server screens ----------
 function dailyScreen(): void {
   screen('Вызов дня', async (box) => {
     const d = await api!.daily();
-    box.replaceChildren(h('p', '', 'Одна попытка в день, у всех одна и та же карта. Вы играете против призрака лидера.'));
+    box.replaceChildren(h('p', '', `Одна попытка в день, у всех одна и та же карта: сегодня «${cats.ROOMS[d.room].name}», даже если она у вас ещё закрыта. Вы играете против призрака лидера.`));
     if (d.rank) box.append(h('p', 'best', `Ваше место: ${d.rank}`));
     box.append(table(d.top, 'Сегодня ещё никто не сыграл. Будьте первым!'));
     if (d.status !== 'finished') box.append(button(d.status === 'active' ? 'Продолжить попытку' : 'Сыграть', 'btn', () => startServer('daily')));
