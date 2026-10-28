@@ -6,6 +6,7 @@ import {
   HEROES,
   PASSIVES,
   PASSIVE_IDS,
+  RARITY,
   ROOMS,
   SLOTS,
   WEAPONS,
@@ -33,8 +34,9 @@ import { dcos, dsin, len } from './math.ts';
 // (weapons, enemies, waves): runs saved under an older version can no
 // longer be replayed to what really happened, only their stored results
 // stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33),
-// 4: floor things from breakables, evolutions from 10:00, boss per level.
-export const SIM_VERSION = 4;
+// 4: floor things from breakables, evolutions from 10:00, boss per level,
+// 5: numbers from the game's own data (waves, elites, XP, the wall, cards).
+export const SIM_VERSION = 5;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
@@ -51,7 +53,7 @@ export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
 export const EVOLVE_TICK = 10 * MINUTE;
 // Smaller elites in between, like the minute bosses of Mad Forest: a giant
 // dust bunny with a chest.
-export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 17].map((m) => m * MINUTE);
+export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 18].map((m) => m * MINUTE);
 export const MAX_ENEMIES = 300; // more than this crawls on older phones
 export const SPAWN_DISTANCE = 520; // just outside a phone screen
 export const MAX_GEMS = 250; // further gems merge into one
@@ -195,7 +197,7 @@ export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin' | 'chest'
 // (those with a level) likelier.
 export const PICKUP_TABLE: Record<Exclude<PickupKind, 'chest'>, { weight: number; level: number }> = {
   food: { weight: 12, level: 0 },
-  coin: { weight: 10, level: 0 },
+  coin: { weight: 60, level: 0 }, // the coin, the bag and the big bag of VS
   plug: { weight: 2, level: 4 },
   alarm: { weight: 1, level: 8 },
   catnip: { weight: 2, level: 12 },
@@ -203,11 +205,13 @@ export const PICKUP_TABLE: Record<Exclude<PickupKind, 'chest'>, { weight: number
 const FREEZE_TICKS = 10 * TICK_RATE;
 // Breakable things (a vase, a flowerpot, a box) turn up near the cat: once a
 // second with this chance times luck, while there are fewer than PROP_MAX.
-const PROP_CHANCE = 0.035;
-const PROP_MAX = 3;
+const PROP_CHANCE = 0.1;
+const PROP_MAX = 10;
 export const PROP_R = 12;
 // Ticks between the projectiles of one attack, from VS.
 const VOLLEY_GAP: Record<WeaponId, number> = { claws: 3, laser: 3, fish: 3, yarn: 0, meow: 0, glass: 9, pot: 6, spark: 1 };
+// The knife's gap shrinks by 20 ms at levels 4, 6 and 8: 100 → 40 ms.
+const FISH_GAP = [3, 3, 3, 2, 2, 2, 2, 1];
 
 export interface Pickup {
   id: number;
@@ -503,7 +507,7 @@ export class CatRun {
       maxHp: hp,
       speed: def.speed,
       dmg: def.dmg,
-      xp: elite ? 60 * (1 + this.time / 60) : def.xp,
+      xp: elite ? 30 : def.xp, // the glowing bat of VS; the bigger elites set their own
       kx: 0,
       ky: 0,
       vx: 0,
@@ -637,7 +641,7 @@ export class CatRun {
         this.swarmNext = this.tick + Math.round(wave.swarm.at * TICK_RATE);
         this.swarmGhost = !!wave.swarm.ghost;
       }
-      if (wave.wall) this.spawnWall(wave.wall);
+      if (wave.wall && this.rng.next() < (wave.wallChance ?? 1)) this.spawnWall(wave.wall);
     }
     if (this.swarmLeft > 0 && this.tick >= this.swarmNext) {
       this.swarmLeft--;
@@ -653,9 +657,24 @@ export class CatRun {
       if (!got) break;
       n += got;
     }
-    if (ELITE_TICKS.includes(this.tick)) {
+    if (this.tick === ELITE_TICKS[0]) {
+      // Mad Forest's first: a plain Mantichana, its health not per level.
+      const e = this.spawn(room.brute, true);
+      e.r *= 1.3;
+      this.emit({ t: 'elite' });
+    }
+    if (this.tick === ELITE_TICKS[1]) {
       const e = this.spawn(room.elite, true);
       e.hp = e.maxHp = ENEMIES[room.elite].hp * this.level; // like VS bosses: health times the cat's level
+      e.xp = 50;
+      this.emit({ t: 'elite' });
+    }
+    if (this.tick === ELITE_TICKS[2]) {
+      // The werewolf boss: 200 health per level, 20 damage (70% here).
+      const e = this.spawn(room.beast, true);
+      e.r *= 1.5;
+      e.hp = e.maxHp = 200 * this.level;
+      e.dmg = 14;
       this.emit({ t: 'elite' });
     }
     if (MINI_ELITE_TICKS.includes(this.tick)) {
@@ -668,6 +687,7 @@ export class CatRun {
     if (this.tick === BOSS_TICK) {
       const b = this.spawn(room.boss, true);
       b.hp = b.maxHp = ENEMIES[room.boss].hp * this.level; // like the elites
+      b.xp = 25;
       this.emit({ t: 'boss' });
     }
     // The boss calls in its helpers around itself.
@@ -832,7 +852,8 @@ export class CatRun {
       }
       // Santa water starts its circle where the first flask can't aim.
       const a = this.rng.next() * Math.PI * 2;
-      for (let i = 0; i < w.amount; i++) this.volleys.push({ id, i, n: w.amount, at: this.tick + i * VOLLEY_GAP[id], a });
+      const gap = id === 'fish' ? FISH_GAP[this.lvl('fish') - 1] : VOLLEY_GAP[id];
+      for (let i = 0; i < w.amount; i++) this.volleys.push({ id, i, n: w.amount, at: this.tick + i * gap, a });
     }
     if (!this.volleys.length) return;
     for (const v of this.volleys) if (v.at <= this.tick) this.fire(v.id, this.weaponStats(v.id), v.i, v.n, v.a);
@@ -1383,7 +1404,7 @@ export class CatRun {
       }
     }
     const rest = pool.filter((id) => !cards.includes(id));
-    return [...cards, ...this.rng.sample(rest, count - cards.length)];
+    return [...cards, ...this.rng.weighted(rest, count - cards.length, (id) => RARITY[id])];
   }
 
   private take(k: CardId): void {

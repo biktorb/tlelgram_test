@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cats } from '../src/index.ts';
+import { Rng } from '../src/rng.ts';
 
 const { BOT_SKILLS, BOT_STYLES, CatRun, RUN_TICKS, Recorder, decodeMoves, dcos, dirFromVector, dsin, playBot, replay } = cats;
 
@@ -348,4 +349,30 @@ test('the boss has health per cat level, like the elites', () => {
   }
   const boss = run.enemies.find((e) => e.kind === 'mop')!;
   assert.equal(boss.maxHp, cats.ENEMIES.mop.hp * 50);
+});
+
+test('elites come as in Mad Forest: a plain brute at 5:00, per-level ones at 10 and 15, with VS experience', () => {
+  const run = new CatRun(4, { events: false });
+  run.level = 20;
+  const seen = new Map<string, { hp: number; xp: number }>();
+  while (run.tick <= cats.ELITE_TICKS[2]) {
+    run.step(0);
+    run.player.hp = run.player.maxHp;
+    while (run.pending) run.choose(0);
+    run.level = 20;
+    for (const e of run.enemies) if (e.elite && !seen.has(e.kind)) seen.set(e.kind, { hp: e.maxHp, xp: e.xp });
+  }
+  assert.deepEqual(seen.get('bigvac'), { hp: cats.ENEMIES.bigvac.hp, xp: 30 });
+  assert.deepEqual(seen.get('bigrobot'), { hp: cats.ENEMIES.bigrobot.hp * 20, xp: 50 });
+  assert.deepEqual(seen.get('brush'), { hp: 200 * 20, xp: 30 });
+  assert.equal(seen.get('rat')?.xp, 30);
+});
+
+test('cards come up as often as the rarity of their VS item', () => {
+  const rng = new Rng(7);
+  const items = ['a', 'b'];
+  let a = 0;
+  for (let i = 0; i < 10000; i++) if (rng.weighted(items, 1, (x) => (x === 'a' ? 50 : 100))[0] === 'a') a++;
+  assert.ok(a > 3100 && a < 3550, `a came ${a} times`);
+  assert.deepEqual(new Rng(1).weighted(items, 5, () => 1).sort(), ['a', 'b']);
 });
