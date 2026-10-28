@@ -219,9 +219,15 @@ export class Game {
   }
 
   // The unfinished run to continue, with its ghost.
-  async current(userId: number): Promise<StartResult | null> {
+  // A run begun on an older simulation can't be continued as it was: it is
+  // closed with its progress, as a new run would close it.
+  async current(userId: number, playerName = ''): Promise<StartResult | null> {
     const run = await this.store.activeRun(userId);
     if (!run) return null;
+    if (run.sim !== cats.SIM_VERSION) {
+      await this.settle(run, playerName, run.record ?? { moves: '', picks: '' });
+      return null;
+    }
     let ghost: Ghost | null = null;
     if (run.daily) ghost = await this.store.dailyGhost(run.daily, userId);
     if (run.duelCode) {

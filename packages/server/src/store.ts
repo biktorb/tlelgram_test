@@ -25,6 +25,7 @@ export interface StoredRun extends RunOutcome {
   hero: cats.HeroId;
   room: cats.RoomId;
   powers: cats.Powers;
+  sim: number; // cats.SIM_VERSION it was played on
   startedAt: number; // ms
   finished: boolean;
   record: RunRecord | null; // the progress saved so far; the final input once finished
@@ -246,6 +247,7 @@ export class MemoryStore implements Store {
       hero: n.hero ?? 'ryzhik',
       room: n.room ?? 'flat',
       powers: { ...n.powers },
+      sim: cats.SIM_VERSION,
       startedAt: Date.now(),
       finished: false,
       record: null,
@@ -492,7 +494,9 @@ function toStored(r: MemRun): StoredRun {
   return { ...run, record: run.record && { ...run.record } };
 }
 
-export function ghostOf(r: StoredRun, name: string): Ghost {
+// A run from an older simulation would not play back as it went, so it races as no ghost.
+export function ghostOf(r: StoredRun, name: string): Ghost | null {
+  if (r.sim !== cats.SIM_VERSION) return null;
   return { name, aura: r.aura, hero: r.hero, room: r.room, powers: r.powers, seed: r.seed, record: r.record!, won: r.won, ticks: r.ticks, kills: r.kills };
 }
 
