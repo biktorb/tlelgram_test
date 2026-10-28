@@ -1,5 +1,5 @@
 import { cats } from '@otryad/core';
-import { HERO_SIZE, flashSprite, heroSprite, sprite, type SpriteId } from './sprites.ts';
+import { HERO_SIZE, art, artCanvas, flashSprite, heroSprite, sprite, type SpriteId } from './sprites.ts';
 
 const { CatRun, DT, Recorder, decodeMoves, dirFromVector, resume } = cats;
 type CatRun = InstanceType<typeof cats.CatRun>;
@@ -153,6 +153,16 @@ const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 
 // fallen log, a table a boulder, a wardrobe a fir; on the road a flowerbed
 // is bushes, a bench a cart, a car a haystack; in the castle shelves are
 // stone walls.
+// Atlas pictures of the furniture kinds: lying along x, standing along y.
+const FURNITURE_ART: Record<Exclude<cats.FurnitureKind, 'shelf'>, [string, string]> = {
+  sofa: ['log', 'log_up'],
+  table: ['boulder', 'boulder'],
+  wardrobe: ['firs_side', 'firs'],
+  flowerbed: ['bushes', 'bushes'],
+  bench: ['cart', 'cart'],
+  car: ['haystack', 'haystack'],
+};
+const PROP_ART: Record<cats.RoomId, string> = { flat: 'basket', yard: 'barrel', warehouse: 'urn' };
 const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
   sofa: ['#8a5f37', '#c49a6c', '#4f3420'],
   table: ['#8e939c', '#aab0b8', '#5a5f68'],
@@ -195,6 +205,7 @@ export class Game {
   private shake = 0;
   private hurt = 0;
   private floor: CanvasPattern | null = null;
+  private lava: CanvasPattern | null = null;
   // Joystick: where the finger went down and where it is now.
   private stick = { on: false, id: -1, ox: 0, oy: 0, x: 0, y: 0 };
   private keys = new Set<string>();
@@ -288,6 +299,8 @@ export class Game {
     this.H = window.innerHeight;
     this.cv.width = Math.round(this.W * this.dpr);
     this.cv.height = Math.round(this.H * this.dpr);
+    // Pixel art keeps hard edges (a resize resets the context).
+    this.ctx.imageSmoothingEnabled = false;
     // World units per screen pixel: the screen shows as much as the sim
     // counts as on screen (13.5 heroes across a phone) and no more, so enemies
     // always come from beyond its edge.
@@ -503,8 +516,43 @@ export class Game {
 
   private furniture: cats.Furniture[] = [];
 
+  // The pixel pictures of the furniture kinds, stretched to their boxes;
+  // false if the atlas is not there.
+  private drawFurnitureArt(f: cats.Furniture): boolean {
+    const c = this.ctx;
+    const tall = f.h > f.w;
+    if (f.kind === 'shelf') {
+      const wall = art('wall');
+      if (!wall) return false;
+      const [img, [x, y, w, h]] = wall;
+      c.fillStyle = 'rgba(10, 6, 16, .35)';
+      c.fillRect(f.x + 4, f.y + 6, f.w, f.h);
+      for (let x0 = f.x; x0 < f.x + f.w; x0 += w) {
+        const cw = Math.min(w, f.x + f.w - x0);
+        c.drawImage(img, x, y, cw, h, x0, f.y, cw, f.h);
+      }
+      c.strokeStyle = '#1e1626';
+      c.lineWidth = 2;
+      c.strokeRect(f.x, f.y, f.w, f.h);
+      return true;
+    }
+    const name = FURNITURE_ART[f.kind][tall ? 1 : 0];
+    const a = art(name);
+    if (!a) return false;
+    const [img, [x, y, w, h]] = a;
+    // A soft shadow, then the picture; the cart's wheels hang below its box.
+    c.fillStyle = 'rgba(30, 20, 10, .2)';
+    c.beginPath();
+    c.ellipse(f.x + f.w / 2 + 4, f.y + f.h * 0.6 + 4, f.w / 2, f.h / 2, 0, 0, Math.PI * 2);
+    c.fill();
+    const dh = f.kind === 'bench' ? (f.h * h) / (h - 8) : f.h;
+    c.drawImage(img, x, y, w, h, f.x, f.y, f.w, dh);
+    return true;
+  }
+
   private drawFurniture(f: cats.Furniture): void {
     const c = this.ctx;
+    if (this.drawFurnitureArt(f)) return;
     const [body, top, edge] = FURNITURE_COLORS[f.kind];
     c.fillStyle = 'rgba(30, 20, 10, .2)';
     c.fillRect(f.x + 6, f.y + 8, f.w, f.h);
@@ -616,10 +664,19 @@ export class Game {
   private drawWalls(px: number, py: number, view: number, t: number): void {
     const c = this.ctx;
     const map = this.run.map;
+    const lava = artCanvas('lava', 4);
     for (const b of map.belts) {
       if (b.y > py + view || b.y + b.h < py - view) continue;
       const x0 = Math.max(b.x, px - view);
       const x1 = Math.min(b.x + b.w, px + view);
+      if (lava) {
+        // The drawn river, flowing with the stream.
+        if (!this.lava) this.lava = c.createPattern(lava, 'repeat-x')!;
+        this.lava.setTransform(new DOMMatrix().translate(t * b.vx, b.y).scale(0.25));
+        c.fillStyle = this.lava;
+        c.fillRect(x0, b.y, x1 - x0, b.h);
+        continue;
+      }
       c.fillStyle = '#d9582b';
       c.fillRect(x0, b.y, x1 - x0, b.h);
       // Chevrons that run with the stream.
@@ -656,6 +713,14 @@ export class Game {
 
   private floorPattern(): CanvasPattern {
     if (this.floor) return this.floor;
+    // The drawn ground, four times up so the pattern keeps hard pixels, then
+    // scaled back to one art pixel per world unit.
+    const tile = artCanvas(`floor_${this.run.room}`, 4);
+    if (tile) {
+      this.floor = this.ctx.createPattern(tile, 'repeat')!;
+      this.floor.setTransform(new DOMMatrix().scale(0.25));
+      return this.floor;
+    }
     const t = document.createElement('canvas');
     t.width = t.height = 128;
     const c = t.getContext('2d')!;
@@ -740,7 +805,11 @@ export class Game {
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = '22px system-ui, sans-serif';
-    for (const pr of run.props) c.fillText(PROP_ICON[run.room], pr.x, pr.y);
+    const prop = art(PROP_ART[run.room]);
+    for (const pr of run.props) {
+      if (prop) c.drawImage(prop[0], ...prop[1], pr.x - 13, pr.y - 13, 26, 26);
+      else c.fillText(PROP_ICON[run.room], pr.x, pr.y);
+    }
     for (const it of run.pickups) {
       const y = it.y + Math.sin(t * 4 + it.id) * 2;
       if (it.kind !== 'coin') {

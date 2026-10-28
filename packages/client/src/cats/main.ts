@@ -2,7 +2,7 @@ import { cats, FRAMES } from '@otryad/core';
 import { haptic, initTelegram, setBack, shareLink, startParam } from '../telegram.ts';
 import { ApiError, connect, type Finished, type HeroInfo, type Profile, type Score, type Started } from './api.ts';
 import { Game, type GameOptions, type RunRecord } from './game.ts';
-import { heroSprite, sprite, type SpriteId } from './sprites.ts';
+import { heroSprite, loadArt, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
 const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
@@ -1030,8 +1030,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseMenu();
 });
 
-{
+// The pictures load first, so the menu shows the drawn heroes.
+void loadArt().then(() => {
   const param = startParam();
   if (api && param.startsWith('d_')) duelScreen(param.slice(2));
   else menu();
-}
+});
