@@ -32,8 +32,9 @@ import { dcos, dsin, len } from './math.ts';
 // Raise it with every change that makes the same input play differently
 // (weapons, enemies, waves): runs saved under an older version can no
 // longer be replayed to what really happened, only their stored results
-// stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33).
-export const SIM_VERSION = 3;
+// stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33),
+// 4: floor things from breakables, evolutions from 10:00, boss per level.
+export const SIM_VERSION = 4;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
@@ -45,6 +46,9 @@ export const END_TICKS = RUN_TICKS + 10 * MINUTE_TICKS;
 const MINUTE = 60 * TICK_RATE;
 export const BOSS_TICK = 18 * MINUTE;
 export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
+// As in VS, only a chest from an enemy that came at 10:00 or later can
+// evolve a weapon; earlier chests only level items up.
+export const EVOLVE_TICK = 10 * MINUTE;
 // Smaller elites in between, like the minute bosses of Mad Forest: a giant
 // dust bunny with a chest.
 export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 17].map((m) => m * MINUTE);
@@ -55,9 +59,10 @@ const DESPAWN_DISTANCE = 1400;
 const KNOCKBACK_DECAY = 0.8777435898906345; // 0.02 per second, per tick
 const CELL = 40;
 const SEPARATE_PAIRS = 6;
-// Half the visible area around the cat, for weapons that strike "on screen".
-const SCREEN_X = 360;
-const SCREEN_Y = 460;
+// Half the visible area around the cat, for weapons that strike "on screen":
+// about what a phone held upright shows.
+const SCREEN_X = 210;
+const SCREEN_Y = 440;
 
 // Difficulty knobs, tuned with `npm run balance:cats`.
 // Enemies hurt the cat only when they overlap it this deep, like the small
@@ -119,6 +124,7 @@ export interface Enemy {
   leader: number; // a hose segment follows this enemy; 0 for the head
   swarm: boolean; // flies straight across in a swarm
   life: number; // ticks until it goes away by itself (the wall); 0 is never
+  born: number; // tick it came
 }
 
 // Things enemies leave behind: slippery water from washers slows the cat,
@@ -184,9 +190,22 @@ export interface Gem {
 // every vacuum for a while, and fish is fish.
 // Chests come only from elites and the boss.
 export type PickupKind = 'food' | 'catnip' | 'alarm' | 'plug' | 'coin' | 'chest';
-export const PICKUP_WEIGHTS: Record<PickupKind, number> = { food: 5, coin: 3, catnip: 1, plug: 1, alarm: 1, chest: 0 };
-const PICKUP_CHANCE = 0.007; // per kill
+// What a broken thing drops, like the light sources of VS: the weight, and
+// the cat level from which it can drop at all. Luck makes the rare ones
+// (those with a level) likelier.
+export const PICKUP_TABLE: Record<Exclude<PickupKind, 'chest'>, { weight: number; level: number }> = {
+  food: { weight: 12, level: 0 },
+  coin: { weight: 10, level: 0 },
+  plug: { weight: 2, level: 4 },
+  alarm: { weight: 1, level: 8 },
+  catnip: { weight: 2, level: 12 },
+};
 const FREEZE_TICKS = 10 * TICK_RATE;
+// Breakable things (a vase, a flowerpot, a box) turn up near the cat: once a
+// second with this chance times luck, while there are fewer than PROP_MAX.
+const PROP_CHANCE = 0.035;
+const PROP_MAX = 3;
+export const PROP_R = 12;
 // Ticks between the projectiles of one attack, from VS.
 const VOLLEY_GAP: Record<WeaponId, number> = { claws: 3, laser: 3, fish: 3, yarn: 0, meow: 0, glass: 9, pot: 6, spark: 1 };
 
@@ -196,6 +215,15 @@ export interface Pickup {
   x: number;
   y: number;
   got: boolean;
+  evo?: boolean; // a chest that can evolve a weapon
+}
+
+// A breakable thing on the floor; any weapon breaks it.
+export interface Prop {
+  id: number;
+  x: number;
+  y: number;
+  broken: boolean;
 }
 
 // What happened during a tick, for effects and sounds. The server skips them.
@@ -285,6 +313,7 @@ export class CatRun {
   hazards: Hazard[] = [];
   wind = 0; // ticks the blower keeps blowing
   pickups: Pickup[] = [];
+  props: Prop[] = [];
   freeze = 0; // ticks the vacuums stay unplugged
   // Yarn: the angle of the first ball, and ticks left while it spins.
   yarnAngle = 0;
@@ -402,6 +431,7 @@ export class CatRun {
     if (this.stats.recovery) p.hp = Math.min(p.maxHp, p.hp + this.stats.recovery * DT);
 
     this.spawner();
+    this.spawnProps();
     this.attack();
     this.moveEnemies();
     if (this.over) return;
@@ -420,6 +450,7 @@ export class CatRun {
     compact(this.hazards, (z) => z.life > 0);
     compact(this.gems, (g) => !g.got);
     compact(this.pickups, (g) => !g.got);
+    compact(this.props, (pr) => !pr.broken);
     if (!this.over && this.tick >= END_TICKS) this.finish(true);
   }
 
@@ -486,6 +517,7 @@ export class CatRun {
       leader: 0,
       swarm: false,
       life: 0,
+      born: this.tick,
     };
     [en.x, en.y] = this.map.pushOut(en.x, en.y, en.r);
     if (def.move === 'charge' || def.move === 'flock') this.aim(en);
@@ -634,7 +666,8 @@ export class CatRun {
       e.dmg = Math.max(8, e.dmg + 1);
     }
     if (this.tick === BOSS_TICK) {
-      this.spawn(room.boss, true);
+      const b = this.spawn(room.boss, true);
+      b.hp = b.maxHp = ENEMIES[room.boss].hp * this.level; // like the elites
       this.emit({ t: 'boss' });
     }
     // The boss calls in its helpers around itself.
@@ -671,27 +704,54 @@ export class CatRun {
       this.kills++;
       this.emit({ t: 'kill', x: en.x, y: en.y, kind: en.kind, elite: en.elite });
       if (en.xp) this.dropGem(en.x, en.y, en.xp);
-      if (en.elite) this.dropPickup(en.x, en.y, 'chest');
-      else if (this.rng.next() < PICKUP_CHANCE) this.dropPickup(en.x, en.y);
+      if (en.elite) this.dropPickup(en.x, en.y, 'chest', en.born >= EVOLVE_TICK);
     }
   }
 
-  private dropPickup(x: number, y: number, kind?: PickupKind): void {
+  private dropPickup(x: number, y: number, kind?: PickupKind, evo = false): void {
     if (!kind) {
-      const kinds = Object.keys(PICKUP_WEIGHTS) as PickupKind[];
+      const kinds = (Object.keys(PICKUP_TABLE) as (keyof typeof PICKUP_TABLE)[]).filter((k) => this.level >= PICKUP_TABLE[k].level);
+      const weight = (k: keyof typeof PICKUP_TABLE) => PICKUP_TABLE[k].weight * (PICKUP_TABLE[k].level ? this.stats.luck : 1);
       let total = 0;
-      for (const k of kinds) total += PICKUP_WEIGHTS[k];
+      for (const k of kinds) total += weight(k);
       let r = this.rng.next() * total;
       kind = kinds[kinds.length - 1];
       for (const k of kinds) {
-        r -= PICKUP_WEIGHTS[k];
+        r -= weight(k);
         if (r < 0) {
           kind = k;
           break;
         }
       }
     }
-    this.pickups.push({ id: this.nextId++, kind, x, y, got: false });
+    this.pickups.push({ id: this.nextId++, kind, x, y, got: false, evo });
+  }
+
+  // Now and then a breakable thing turns up near the cat; things left far
+  // behind are gone.
+  private spawnProps(): void {
+    const p = this.player;
+    compact(this.props, (pr) => (pr.x - p.x) ** 2 + (pr.y - p.y) ** 2 < DESPAWN_DISTANCE ** 2);
+    if (this.tick % TICK_RATE || this.tick >= RUN_TICKS || this.props.length >= PROP_MAX) return;
+    if (this.rng.next() >= PROP_CHANCE * this.stats.luck) return;
+    for (let i = 0; i < 8; i++) {
+      const a = this.rng.next() * Math.PI * 2;
+      const d = 150 + this.rng.next() * 250;
+      const x = p.x + dcos(a) * d;
+      const y = p.y + dsin(a) * d;
+      if (!this.map.inside(x, y) || this.map.blocked(x, y, PROP_R)) continue;
+      this.props.push({ id: this.nextId++, x, y, broken: false });
+      return;
+    }
+  }
+
+  // Breaks the things a weapon touched: `inside` says whether a point is in the hit.
+  private smash(inside: (x: number, y: number) => boolean): void {
+    for (const pr of this.props) {
+      if (pr.broken || !inside(pr.x, pr.y)) continue;
+      pr.broken = true;
+      this.dropPickup(pr.x, pr.y);
+    }
   }
 
   private dropGem(x: number, y: number, v: number): void {
@@ -796,6 +856,7 @@ export class CatRun {
         for (const en of this.enemies) {
           if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, 'claws', this.evolved.claws ? 0.5 : 0);
         }
+        if (this.props.length) this.smash((x, y) => Math.abs(x - cx) < width / 2 + PROP_R && Math.abs(y - cy) < h / 2 + PROP_R);
         break;
       }
       case 'laser': {
@@ -856,6 +917,7 @@ export class CatRun {
         this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
         const times = this.evolved.spark ? 2 : 1;
         for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0, 'spark');
+        if (this.props.length) this.smash((x, y) => (x - t.x) ** 2 + (y - t.y) ** 2 < (R + PROP_R) ** 2);
         break;
       }
     }
@@ -874,6 +936,7 @@ export class CatRun {
     const R = 62 * w.area;
     const every = Math.max(2, Math.round(w.cd * TICK_RATE));
     if (this.tick % every === 0) this.emit({ t: 'wave', x: p.x, y: p.y, r: R });
+    if (this.props.length) this.smash((x, y) => (x - p.x) ** 2 + (y - p.y) ** 2 < (R + PROP_R) ** 2);
     for (const en of this.enemies) {
       if (en.dead || en.meowTick > this.tick) continue;
       if ((en.x - p.x) ** 2 + (en.y - p.y) ** 2 < (R + en.r) ** 2) {
@@ -903,6 +966,7 @@ export class CatRun {
       const s = dsin(a);
       const x = p.x + c * R;
       const y = p.y + s * R;
+      if (this.props.length) this.smash((px, py) => (px - x) ** 2 + (py - y) ** 2 < (r + PROP_R) ** 2);
       for (const en of this.enemies) {
         if (en.dead || en.yarnTick > this.tick) continue;
         if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + r) ** 2) {
@@ -1162,6 +1226,7 @@ export class CatRun {
       s.x += s.vx * DT;
       s.y += s.vy * DT;
       s.life--;
+      if (this.props.length) this.smash((x, y) => (x - s.x) ** 2 + (y - s.y) ** 2 < (s.r + PROP_R) ** 2);
       for (const en of this.enemies) {
         if (en.dead || s.life <= 0) continue;
         if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 >= (en.r + s.r) ** 2 || s.hits.includes(en.id)) continue;
@@ -1188,6 +1253,7 @@ export class CatRun {
         z.r += 6 * DT;
       }
       if (z.life % 15 !== 0) continue;
+      if (this.props.length) this.smash((x, y) => (x - z.x) ** 2 + (y - z.y) ** 2 < (z.r + PROP_R) ** 2);
       for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0, 'glass');
     }
   }
@@ -1235,7 +1301,7 @@ export class CatRun {
           this.freeze = FREEZE_TICKS;
           break;
         case 'chest':
-          this.openChest();
+          this.openChest(!!it.evo);
           break;
         case 'alarm':
           for (const en of this.enemies) {
@@ -1251,11 +1317,11 @@ export class CatRun {
     return this.weapons().filter((w) => !this.evolved[w] && this.lvl(w) >= itemMax(w) && this.lvl(EVOLUTIONS[w].passive) > 0);
   }
 
-  // A chest evolves a ready weapon; otherwise it levels up 1 item, or with
-  // luck 3 or 5.
-  private openChest(): void {
+  // A chest evolves a ready weapon (if it may: `evo`); otherwise it levels
+  // up 1 item, or with luck 3 or 5.
+  private openChest(evo: boolean): void {
     const evolved: WeaponId[] = [];
-    const ready = this.evolvable();
+    const ready = evo ? this.evolvable() : [];
     if (ready.length) {
       this.evolved[ready[0]] = true;
       evolved.push(ready[0]);

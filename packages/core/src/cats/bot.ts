@@ -53,6 +53,14 @@ export function botMove(run: CatRun, style: BotStyle): number {
       gem = it;
     }
   }
+  // Breakable things drop what is on the floor: worth a short walk.
+  for (const pr of run.props) {
+    const d2 = ((pr.x - p.x) ** 2 + (pr.y - p.y) ** 2) / 4;
+    if (d2 < gd) {
+      gd = d2;
+      gem = pr;
+    }
+  }
   const step = run.stats.move * LOOK;
   // A hurt cat plays safer.
   const care = 1 + 3 * (1 - p.hp / p.maxHp);
