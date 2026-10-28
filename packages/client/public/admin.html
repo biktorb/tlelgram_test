@@ -66,7 +66,7 @@
   }
 
   // The latest finished runs, replayed on the server: what kills players and when.
-  const KIND = { mouse: 'Мышь', dust: 'Пыль', robot: 'Робот', bigrobot: 'Большой робот', mop: 'Швабра-босс', cleaner: 'Уборщица' };
+  let KIND = {}; // enemy names, sent with the runs
   const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
   const row = (cells) => `<tr>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
   const head = (cells) => `<tr>${cells.map((c) => `<th>${c}</th>`).join('')}</tr>`;
@@ -77,14 +77,17 @@
     if (!res || !res.ok) return (box.innerHTML = '<p class="muted">Забеги не загрузились.</p>');
     const data = await res.json();
     const s = data.summary;
-    if (!s.runs) return (box.innerHTML = '<h2>Забеги</h2><p class="muted">Пока нет доигранных забегов.</p>');
+    KIND = data.names ?? {};
+    if (!data.runs.length) return (box.innerHTML = '<h2>Забеги</h2><p class="muted">Пока нет доигранных забегов.</p>');
     const hurt = Object.entries(s.hurt).sort((a, b) => b[1].dmg - a[1].dmg);
     box.innerHTML =
-      `<h2>Последние ${s.runs} забегов</h2><div class="tiles">` +
-      tile(s.wins, { fmt: (v) => `${v} из ${s.runs}`, text: 'дожили до 20:00' }) +
+      `<h2>Последние ${data.runs.length} забегов</h2><div class="tiles">` +
+      tile(data.total.wins, { fmt: (v) => `${v} из ${data.total.runs}`, text: 'дожили до 20:00' }) +
       tile(s.medianSeconds, { fmt: mmss, text: 'медианное время забега' }) +
       tile(s.medianFirstHit, { fmt: (v) => (v === null ? '—' : `${v} с`), text: 'медиана до первого удара по коту' }) +
-      '</div><h2>Кто бьёт кота</h2><div class="wrap"><table>' + head(['Враг', 'Ударов', 'Урон', 'Добил']) +
+      '</div>' +
+      (s.runs < data.runs.length ? `<p class="muted">Разбор ниже — по ${s.runs} забегам текущей версии игры. Забеги до обновления врагов и оружия показаны с итогом, который сервер записал в конце забега: переиграть их по-старому уже нельзя.</p>` : '') +
+      '<h2>Кто бьёт кота</h2><div class="wrap"><table>' + head(['Враг', 'Ударов', 'Урон', 'Добил']) +
       hurt.map(([k, h]) => row([KIND[k] ?? k, h.hits, h.dmg, s.deathBy[k] ?? 0])).join('') +
       '</table></div><h2>По минутам</h2><div class="wrap"><table>' + head(['Минута', 'Живы', 'Умерли', 'Ударов за мин', 'Урон за мин', 'HP в конце']) +
       s.perMinute.map((m, i) => row([`${i}–${i + 1}`, m.alive, s.deathMinute[i] ?? 0, m.hits, m.dmg, `${m.hp}%`])).join('') +
@@ -92,7 +95,8 @@
       data.runs.map((r) => {
         const a = r.insight;
         const when = r.finishedAt.slice(8, 10) + '.' + r.finishedAt.slice(5, 7) + ' ' + r.finishedAt.slice(11, 16);
-        if (!a) return row([esc(r.name), when, '—', '', '', 'не разобрался', '', '', '']);
+        const st = r.stored;
+        if (!a) return row([esc(r.name), when, (st.won ? '🏆 ' : '') + mmss(st.seconds), st.level, st.kills, r.old ? 'старая версия' : 'не разобрался', '', '', '']);
         return row([esc(r.name), when, (a.won ? '🏆 ' : '') + mmss(a.seconds), a.level, a.kills, a.deathBy ? KIND[a.deathBy] ?? a.deathBy : '—',
           `${Math.round(a.moving * 100)}%`, a.turns, a.evolved.length]);
       }).join('') +

@@ -71,7 +71,7 @@ export async function buildApp(
   // The unfinished run to continue, if any.
   app.get('/api/runs/current', async (req) => {
     const u = user(req);
-    return { current: await game.current(u.id) };
+    return { current: await game.current(u.id, u.first_name || 'Игрок') };
   });
 
   app.post<{ Body: { mode?: unknown; duel?: unknown; hero?: unknown; room?: unknown } | null }>('/api/runs', async (req) => {
@@ -143,16 +143,20 @@ export async function buildApp(
       runs.map(async (r) => {
         let a = insights.get(r.id);
         if (!a) {
-          a = r.record ? analyze(r.seed, r.record, { hero: r.hero, room: r.room, powers: r.powers }).catch(() => null) : Promise.resolve(null);
+          // Only runs of this simulation replay as they were played.
+          a = r.record && r.sim === cats.SIM_VERSION ? analyze(r.seed, r.record, { hero: r.hero, room: r.room, powers: r.powers }).catch(() => null) : Promise.resolve(null);
           insights.set(r.id, a);
           if (insights.size > 1000) insights.delete(insights.keys().next().value!);
         }
         const insight = await a;
-        return { id: r.id, name: r.name, mode: r.mode, finishedAt: new Date(r.finishedAt).toISOString(), insight };
+        // What the server's replay stored when the run ended stays true for every version.
+        const stored = { won: r.won, seconds: Math.round(r.ticks / cats.TICK_RATE), kills: r.kills, level: r.level, room: r.room, hero: r.hero };
+        return { id: r.id, name: r.name, mode: r.mode, finishedAt: new Date(r.finishedAt).toISOString(), old: r.sim !== cats.SIM_VERSION, stored, insight };
       }),
     );
     const ok = list.flatMap((r) => (r.insight ? [r.insight] : []));
-    return { summary: cats.summarize(ok), runs: list };
+    const names = Object.fromEntries(Object.entries(cats.ENEMIES).map(([k, d]) => [k, d.name]));
+    return { summary: cats.summarize(ok), names, total: { runs: list.length, wins: list.filter((r) => r.stored.won).length }, runs: list };
   });
 
   // Fish, auras and today's tasks; finished tasks are paid here.

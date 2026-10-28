@@ -29,6 +29,11 @@ import { RoomMap } from './map.ts';
 import { dcos, dsin, len } from './math.ts';
 
 // Fixed step: the same input on the same seed gives the same run everywhere.
+// Raise it with every change that makes the same input play differently
+// (weapons, enemies, waves): runs saved under an older version can no
+// longer be replayed to what really happened, only their stored results
+// stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33).
+export const SIM_VERSION = 3;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;

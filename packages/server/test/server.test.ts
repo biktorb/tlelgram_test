@@ -535,6 +535,29 @@ for (const [name, makeStore] of stores) {
       assert.equal(body.summary.runs, body.runs.filter((r: { insight: unknown }) => r.insight).length);
     });
 
+    // Marks a run as played on an older simulation, as runs from before a deploy are.
+    const makeOld = async (runId: string) => {
+      if (store instanceof MemoryStore) (store as unknown as { runs: Map<string, { sim: number }> }).runs.get(runId)!.sim = 1;
+      else await (store as unknown as { pool: { query: (q: string, v: unknown[]) => Promise<unknown> } }).pool.query('UPDATE cat_runs SET sim = 1 WHERE id = $1', [runId]);
+    };
+
+    test('runs from an older simulation keep their stored result and are not replayed', async () => {
+      const { run } = await start(170);
+      const result = (await finish(170, run.id)).result;
+      await makeOld(run.id);
+      const body = (await app.inject({ method: 'GET', url: '/api/admin/runs?limit=100', headers: { 'x-admin-key': config.adminKey! } })).json();
+      const row = body.runs.find((r: { id: string }) => r.id === run.id);
+      assert.equal(row.old, true);
+      assert.equal(row.insight, null);
+      assert.deepEqual([row.stored.won, row.stored.kills], [result.won, result.kills]);
+      assert.equal(body.total.wins, body.runs.filter((r: { stored: { won: boolean } }) => r.stored.won).length);
+      // An unfinished old run is closed instead of continued, and races as no ghost.
+      const { run: open } = await start(171);
+      await makeOld(open.id);
+      assert.equal((await get(171, '/api/runs/current')).json().current, null);
+      assert.equal((await post(171, `/api/runs/${open.id}/finish`, AFK)).statusCode, 409);
+    });
+
     test('profile stats: finished runs, wins and the best result', async () => {
       const r = await play(150);
       const me = (await get(150, '/api/me')).json();

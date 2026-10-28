@@ -81,9 +81,9 @@ export class PgStore implements Store {
   async createRun(userId: number, n: NewRun): Promise<StoredRun> {
     try {
       const { rows } = await this.pool.query(
-        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero, room, powers)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${RUN_COLUMNS}`,
-        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik', n.room ?? 'flat', n.powers ?? {}],
+        `INSERT INTO cat_runs (user_id, seed, mode, daily, duel_code, chat_instance, aura, hero, room, powers, sim)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING ${RUN_COLUMNS}`,
+        [userId, n.seed, n.mode, n.daily ?? null, n.duelCode ?? null, n.chatInstance ?? null, n.aura ?? null, n.hero ?? 'ryzhik', n.room ?? 'flat', n.powers ?? {}, cats.SIM_VERSION],
       );
       return toRun(rows[0]);
     } catch (e) {
@@ -401,7 +401,7 @@ export class PgStore implements Store {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RUN_COLUMNS =
-  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, room, cat_runs.powers, started_at, finished_at, won, ticks, kills, level, points, cat_runs.fish, record";
+  "cat_runs.id, cat_runs.user_id, seed, mode, to_char(daily, 'YYYY-MM-DD') AS daily, duel_code, aura, hero, room, cat_runs.powers, sim, started_at, finished_at, won, ticks, kills, level, points, cat_runs.fish, record";
 const LEAGUE_COLUMNS = "user_id, to_char(week, 'YYYY-MM-DD') AS week, league, moved, points, to_char(day, 'YYYY-MM-DD') AS day, day_runs";
 
 interface ScoreSqlRow {
@@ -425,6 +425,7 @@ function toRun(row: {
   hero: StoredRun['hero'];
   room: StoredRun['room'];
   powers: unknown;
+  sim: number;
   started_at: Date;
   finished_at: Date | null;
   won: boolean;
@@ -446,6 +447,7 @@ function toRun(row: {
     hero: row.hero,
     room: row.room,
     powers: cats.cleanPowers(row.powers),
+    sim: row.sim,
     startedAt: row.started_at.getTime(),
     finished: row.finished_at !== null,
     won: row.won,
