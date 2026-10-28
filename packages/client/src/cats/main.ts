@@ -121,6 +121,66 @@ function catPicture(px: number, hero: HeroId = chosenHero()): HTMLCanvasElement 
   return c;
 }
 
+// Level squares under an icon, as in VS: one per level, filled up to `level`.
+function pips(level: number, max: number): HTMLElement {
+  const row = h('div', 'pips');
+  for (let i = 0; i < max; i++) row.append(h('i', i < level ? 'on' : ''));
+  return row;
+}
+
+// What the cat carries: a row of weapons and a row of passives, each slot
+// with its level squares; empty slots show as frames.
+function inventory(run: CatRun): HTMLElement {
+  const box = h('div', 'inv frame');
+  const row = (ids: ItemId[]) => {
+    const r = h('div', 'row');
+    for (let i = 0; i < cats.SLOTS; i++) {
+      const k = ids[i];
+      if (!k) {
+        r.append(h('div', 'cell empty'));
+        continue;
+      }
+      const evo = isWeapon(k) && run.evolved[k];
+      const cell = h('div', evo ? 'cell evo' : 'cell');
+      cell.append(icon(k, 30), pips(run.lvl(k), cats.itemMax(k)));
+      r.append(cell);
+    }
+    return r;
+  };
+  box.append(row(run.weapons()), row(run.passives()));
+  return box;
+}
+
+const pct = (x: number) => `${x > 0 ? '+' : '−'}${Math.round(Math.abs(x) * 1000) / 10}%`.replace('.', ',');
+
+// Every stat of the cat, like the left panel of VS: a dash where nothing adds to it.
+function statList(run: CatRun): HTMLElement {
+  const st = run.stats;
+  const list = h('div', 'statlist frame');
+  const add = (name: string, value: string | null) => list.append(h('span', '', name), h('b', value ? '' : 'none', value ?? '–'));
+  const gap = () => list.append(h('i', 'gap'));
+  const rel = (x: number) => (Math.abs(x) > 1e-6 ? pct(x) : null);
+  add('Макс. здоровье', String(Math.round(st.maxHp)));
+  add('Регенерация', st.recovery.toFixed(2).replace('.', ','));
+  add('Броня', st.armor ? `+${st.armor}` : null);
+  add('Скорость движения', rel(st.move / cats.BASE_STATS.move - 1));
+  gap();
+  add('Сила', rel(st.might - 1));
+  add('Скорость снарядов', rel(st.speed - 1));
+  add('Продолжительность', rel(st.duration - 1));
+  add('Область', rel(st.area - 1));
+  gap();
+  add('Перезарядка', rel(st.cooldown - 1));
+  add('Боезапас', st.amount ? `+${st.amount}` : null);
+  add('Девятая жизнь', run.revives ? String(run.revives) : null);
+  add('Магнит', String(Math.round(st.magnet)));
+  gap();
+  add('Удача', rel(st.luck - 1));
+  add('Рост опыта', rel(st.growth - 1));
+  add('Реролл', run.rerolls ? String(run.rerolls) : null);
+  return list;
+}
+
 function overlay(...children: HTMLElement[]): HTMLElement {
   const o = h('div', 'overlay');
   o.append(...children);
@@ -178,13 +238,12 @@ function menu(): void {
   const hero = cats.HEROES[chosenHero()];
   const pick = h('div', 'picks');
   pick.append(
-    button(`🐱 ${hero.name}`, 'btn secondary small', () => heroScreen()),
-    button(`🏠 ${cats.ROOMS[chosenRoom()].name}`, 'btn secondary small', () => roomScreen()),
-    button('📖 Коллекция', 'btn secondary small', () => collectionScreen()),
+    button(`🐱 ${hero.name}`, 'tile', () => heroScreen()),
+    button(`🏠 ${cats.ROOMS[chosenRoom()].name}`, 'tile', () => roomScreen()),
   );
   box.append(pick);
   const buttons = h('div', 'buttons');
-  buttons.append(button('Играть', 'btn', () => startServer('free')));
+  buttons.append(button('Начать', 'btn', () => startServer('free')));
   if (s.last) {
     const last = s.last;
     buttons.append(
@@ -192,6 +251,12 @@ function menu(): void {
     );
   }
   box.append(buttons);
+  // The three of the VS title screen: collection, Power Ups, unlocks.
+  const main = h('div', 'tiles three');
+  main.append(button('Коллекция', 'tile', () => collectionScreen()));
+  if (api) main.append(button('Усиление', 'tile green', () => powerScreen()));
+  main.append(button('Открыто', 'tile', () => unlockScreen()));
+  box.append(main);
 
   if (api) {
     const more = h('div', 'tiles');
@@ -199,7 +264,6 @@ function menu(): void {
       button('📅 Вызов дня', 'tile', () => dailyScreen()),
       button('🏆 Лига', 'tile', () => leagueScreen()),
       button('🐟 Рыба', 'tile', () => profileScreen()),
-      button('⚡ Прокачка', 'tile', () => powerScreen()),
       button('⚔️ Вызовы', 'tile', () => answersScreen()),
     );
     box.append(more);
@@ -272,6 +336,7 @@ function play(seed: number, opts: GameOptions & { ghostName?: string } = {}): vo
       onEvent: (e) => {
         if (e.t === 'hurt') haptic.hit();
         if (e.t === 'level' || e.t === 'revive') haptic.result('success');
+        if (e.t === 'chest') chestScreen(e);
       },
       onCheckpoint: saveProgress,
     },
@@ -335,20 +400,66 @@ function levelUp(cards: CardId[], levels: number[], choose: (i: number) => void,
       choose(i);
     });
     const text = h('div', 'text');
-    text.append(h('b', '', cardName(k)), h('span', '', cardText(k, levels[i])));
-    const kind = isWeapon(k) ? 'оружие' : k === 'snack' || k === 'fishes' ? '' : 'пассивка';
-    b.append(icon(k), text, h('span', 'lv', kind && levels[i] ? `ур. ${levels[i] + 1}` : kind ? `новое ${kind}` : ''));
+    const head = h('div', 'head');
+    const extra = k === 'snack' || k === 'fishes';
+    head.append(h('b', '', cardName(k)), h('span', extra ? '' : levels[i] ? 'lv' : 'new-tag', extra ? '' : levels[i] ? `ур. ${levels[i] + 1}` : 'Новое!'));
+    text.append(head, h('span', '', cardText(k, levels[i])));
+    b.append(icon(k), text);
     list.append(b);
   });
-  const box = overlay(h('h1', '', 'Новый уровень!'), list);
-  if (reroll) box.append(button('🎲 Другие карточки (1 раз)', 'btn secondary reroll', () => reroll()));
+  const box = overlay(h('h1', '', 'Новый уровень!'));
+  if (game) box.append(inventory(game.run));
+  box.append(list);
+  if (cards.length < 4) box.append(h('p', 'luckhint', 'Увеличьте удачу ради шанса получить 4 варианта.'));
+  if (reroll) box.append(button('🎲 Другие карточки', 'btn secondary reroll', () => reroll()));
   box.classList.add('level');
   ui.append(box);
 }
 
+// A chest opens on its own screen, as in VS: it shakes, bursts, and what it
+// held comes out one item at a time. The run waits until it is closed.
+function chestScreen(e: { evolved: cats.WeaponId[]; items: ItemId[] }): void {
+  if (!game) return;
+  const g = game;
+  g.setPaused(true);
+  const stage = h('div', 'stage');
+  const chest = h('div', 'chest', '🧰');
+  stage.append(chest);
+  const loot = h('div', 'loot');
+  const done = button('Готово', 'btn', () => {
+    box.remove();
+    if (game === g && !ui.querySelector('.overlay.pausebox')) g.setPaused(false);
+  });
+  done.style.visibility = 'hidden';
+  const inner = h('div', 'chestbox frame');
+  inner.append(h('h1', '', 'Сундук'), stage, loot, done);
+  const box = overlay(inner);
+  box.classList.add('chest');
+  ui.append(box);
+  const rows: HTMLElement[] = [];
+  for (const w of e.evolved) {
+    const r = h('div');
+    r.append(icon(w, 30), h('b', '', `★ ${cats.EVOLUTIONS[w].name}`), h('span', 'lv', 'эволюция!'));
+    rows.push(r);
+  }
+  for (const k of e.items) {
+    const r = h('div');
+    r.append(icon(k, 30), h('b', '', cardName(k)), h('span', 'lv', `ур. ${g.run.lvl(k)}`));
+    rows.push(r);
+  }
+  if (!rows.length) rows.push(h('div', '', '+10 🐟'));
+  setTimeout(() => {
+    chest.classList.add('open');
+    chest.textContent = '✨';
+    stage.prepend(h('div', 'rays'));
+    rows.forEach((r, i) => setTimeout(() => loot.append(r), 250 + i * 350));
+    setTimeout(() => (done.style.visibility = 'visible'), 250 + rows.length * 350);
+  }, 1000);
+}
+
 // Which weapons evolve with which passive, and how far each pair is.
 function evolutionList(run: CatRun): HTMLElement {
-  const list = h('div', 'evos');
+  const list = h('div', 'evos frame');
   list.append(h('b', '', 'Эволюции'));
   for (const w of run.weapons()) {
     const evo = cats.EVOLUTIONS[w];
@@ -366,7 +477,7 @@ function evolutionList(run: CatRun): HTMLElement {
 // What each weapon has done this run, like the VS pause screen: level,
 // damage, how long the cat has had it and damage per second.
 function damageTable(run: CatRun): HTMLElement {
-  const table = h('div', 'dmg');
+  const table = h('div', 'dmg frame');
   table.append(h('b', 'head', 'Оружие'), h('b', 'head', 'ур.'), h('b', 'head', 'урон'), h('b', 'head', 'время'), h('b', 'head', 'в сек.'));
   const rows = run.weapons().sort((a, b) => (run.damage[b] ?? 0) - (run.damage[a] ?? 0));
   for (const w of rows) {
@@ -395,63 +506,82 @@ function remember(run: CatRun): void {
   save(s);
 }
 
-// Every weapon and passive and what they evolve into, like the VS collection.
+// Every weapon, evolution and passive, like the VS collection: a grid where
+// what this device has not met yet is a question mark, and a panel about the
+// one picked.
 function collectionScreen(): void {
   stopGame();
   setBack(() => menu());
   const found = new Set(load().found ?? []);
-  const body = h('div', 'panel');
-  body.append(
-    h('p', '', `Оружие растёт до ${cats.WEAPON_MAX} уровня. Оружие ${cats.WEAPON_MAX} уровня вместе с нужной пассивкой превращается в эволюцию из сундука элиты или босса.`),
-    h('h2', '', 'Оружие и эволюции'),
-  );
+  type Entry = { key: string; icon: () => HTMLElement; name: string; text: string; hint: string };
+  const entries: Entry[] = [];
   for (const w of cats.WEAPON_IDS) {
     const def = cats.WEAPONS[w];
-    const evo = cats.EVOLUTIONS[w];
-    const card = h('div', `herocard coll${found.has(w) ? '' : ' new'}`);
-    const text = h('div', 'text');
     const b = def.base;
-    text.append(
-      h('b', '', def.name),
-      h('span', '', def.desc[0]),
-      h('span', 'nums', `Урон ${b.dmg} · перезарядка ${b.cd} с · снарядов ${b.amount}`),
-    );
-    const recipe = h('div', 'recipe');
-    recipe.append(icon(w, 22), h('span', '', '+'), icon(evo.passive, 22), h('span', '', '→'), h('b', found.has(`evo:${w}`) ? 'got' : '', `★ ${evo.name}`));
-    text.append(recipe, h('span', '', evo.desc));
-    card.append(icon(w), text);
-    body.append(card);
+    entries.push({ key: w, icon: () => icon(w, 30), name: def.name, text: def.desc[0], hint: `Урон ${b.dmg} · перезарядка ${b.cd} с · снарядов ${b.amount}` });
   }
-  body.append(h('h2', '', 'Пассивки'));
+  for (const w of cats.WEAPON_IDS) {
+    const evo = cats.EVOLUTIONS[w];
+    entries.push({ key: `evo:${w}`, icon: () => icon(w, 30), name: `★ ${evo.name}`, text: evo.desc, hint: `Нужно: ${cats.WEAPONS[w].name} ур. ${cats.WEAPON_MAX} + ${cats.PASSIVES[evo.passive].name}, сундук после 10:00` });
+  }
   for (const id of cats.PASSIVE_IDS) {
     const def = cats.PASSIVES[id];
-    const card = h('div', `herocard coll${found.has(id) ? '' : ' new'}`);
-    const text = h('div', 'text');
     const evolves = cats.WEAPON_IDS.filter((w) => cats.EVOLUTIONS[w].passive === id);
-    text.append(h('b', '', def.name), h('span', '', `${def.desc}, до ${def.max} уровня`));
-    if (evolves.length) text.append(h('span', 'nums', `Нужна для: ${evolves.map((w) => cats.EVOLUTIONS[w].name).join(', ')}`));
-    card.append(icon(id), text);
-    body.append(card);
+    entries.push({ key: id, icon: () => icon(id, 30), name: def.name, text: `${def.desc}, до ${def.max} уровня`, hint: evolves.length ? `Нужна для: ${evolves.map((w) => cats.EVOLUTIONS[w].name).join(', ')}` : '' });
   }
-  const box = overlay(h('h1', '', 'Коллекция'), body, button('Назад', 'btn secondary', () => menu()));
+  const got = entries.filter((e) => found.has(e.key)).length;
+  const detail = h('div', 'detail frame');
+  const show = (e: Entry) => {
+    const text = h('div', 'text');
+    if (found.has(e.key)) {
+      text.append(h('b', '', e.name), h('span', '', e.text));
+      if (e.hint) text.append(h('span', 'hint', e.hint));
+      detail.replaceChildren(e.icon(), text);
+    } else {
+      text.append(h('b', '', '???'), h('span', '', 'Ещё не найдено. Возьмите это в забеге, и здесь появится описание.'));
+      if (e.key.startsWith('evo:')) text.append(h('span', 'hint', e.hint));
+      detail.replaceChildren(text);
+    }
+  };
+  const grid = h('div', 'grid small');
+  for (const e of entries) {
+    const known = found.has(e.key);
+    const cls = `cellbtn${known ? '' : ' unknown'}${e.key.startsWith('evo:') ? ' evo' : ''}`;
+    const cell = button('', cls, () => {
+      grid.querySelector('.on')?.classList.remove('on');
+      cell.classList.add('on');
+      show(e);
+    });
+    if (known) cell.append(e.icon());
+    else cell.append(h('span', 'q', '?'));
+    grid.append(cell);
+  }
+  const body = h('div', 'panel frame');
+  body.style.padding = '10px';
+  body.append(h('div', 'counter', `Собрано: ${got} из ${entries.length}`), grid);
+  (grid.firstElementChild as HTMLButtonElement).click();
+  const box = overlay(h('h1', '', 'Коллекция'), body, detail, button('Назад', 'btn secondary', () => menu()));
   box.classList.add('page');
   ui.replaceChildren(box);
 }
 
 function pauseMenu(): void {
-  if (!game || game.run.over || ui.querySelector('.overlay:not(.level)')) return;
+  if (!game || game.run.over || ui.querySelector('.overlay.pausebox')) return;
   game.setPaused(true);
   saveProgress();
-  const box = overlay(
-    h('h1', '', 'Пауза'),
+  const run = game.run;
+  const buttons = h('div', 'buttons');
+  buttons.append(
     button('Продолжить', 'btn', () => {
       box.remove();
-      game?.setPaused(false);
+      if (!ui.querySelector('.overlay.chest')) game?.setPaused(false);
     }),
     button('Выйти в меню', 'btn secondary', () => menu()),
   );
+  const box = overlay(h('h1', '', 'Пауза'), inventory(run), statList(run), buttons);
+  box.classList.add('pausebox', 'page');
   if (serverRun) box.append(h('p', '', 'Забег сохранён, его можно продолжить позже.'));
-  box.append(damageTable(game.run), evolutionList(game.run));
+  box.append(damageTable(run), evolutionList(run));
   ui.append(box);
 }
 
@@ -583,25 +713,49 @@ function heroScreen(): void {
 }
 
 // ---------- Power Ups ----------
-// Permanent bonuses for fish, as in VS; every level bought makes the next ones dearer.
+// Permanent bonuses for fish, as in VS: a grid of cells with their rank
+// squares, a panel about the one picked with its price, and a reset that
+// gives all the fish back. Every level bought makes the next ones dearer.
+const POWER_ICONS: Record<cats.PowerId, string> = {
+  might: '🥫',
+  armor: '🛡️',
+  maxHp: '🍗',
+  recovery: '💤',
+  move: '👟',
+  area: '🦶',
+  cooldown: '📦',
+  magnet: '🌿',
+  luck: '🍀',
+  growth: '👑',
+  greed: '🐟',
+  reroll: '🎲',
+  revive: '😺',
+};
+
 function powerScreen(): void {
-  screen('Прокачка', async (box) => {
+  let picked: cats.PowerId = 'might';
+  screen('Усиления', async (box) => {
     const render = (p: Profile) => {
-      box.replaceChildren(
-        h('p', '', 'Бонусы навсегда, для всех котов. Каждая покупка дорожает следующие на 10%. Рыбу можно вернуть и купить в другом порядке.'),
-        h('p', 'best', `🐟 ${p.fish}`),
-      );
-      for (const id of cats.POWER_IDS) {
+      const reset = button(`Сброс усилений${p.powerSpent ? ` (+${p.powerSpent} 🐟)` : ''}`, 'btn', async () => {
+        try {
+          render(await api!.refund());
+        } catch (e) {
+          toast(errorText(e));
+        }
+      });
+      reset.disabled = p.powerSpent <= 0;
+      const grid = h('div', 'grid');
+      const detail = h('div', 'detail frame');
+      const show = (id: cats.PowerId) => {
         const def: cats.PowerDef = cats.POWERS[id];
         const lvl = p.powers[id] ?? 0;
-        const card = h('div', `herocard${lvl ? ' on' : ''}`);
         const text = h('div', 'text');
-        text.append(h('b', '', `${def.name} ${'●'.repeat(lvl)}${'○'.repeat(def.max - lvl)}`), h('span', '', `${def.desc} за уровень`));
-        card.append(text);
-        if (lvl >= def.max) card.append(h('span', 'lv', 'максимум'));
+        text.append(h('b', '', def.name), h('span', '', `${def.desc} за ранг (макс. ${def.max}).`));
+        const buy = h('div', 'buy');
+        if (lvl >= def.max) buy.append(h('span', '', 'Максимум'));
         else {
           const price = cats.powerPrice(id, p.powers);
-          const b = button(`${price} 🐟`, 'btn small', async () => {
+          const b = button('Купить', 'btn green small', async () => {
             try {
               render(await api!.shop('buy', `power:${id}`));
             } catch (e) {
@@ -609,23 +763,70 @@ function powerScreen(): void {
             }
           });
           b.disabled = p.fish < price;
-          card.append(b);
+          buy.append(h('span', '', `${price} 🐟`), b);
         }
-        box.append(card);
+        const ic = h('span', 'ico emoji', POWER_ICONS[id]);
+        detail.replaceChildren(ic, text, buy);
+      };
+      for (const id of cats.POWER_IDS) {
+        const def: cats.PowerDef = cats.POWERS[id];
+        const cell = button('', `cellbtn${id === picked ? ' on' : ''}`, () => {
+          picked = id;
+          grid.querySelector('.on')?.classList.remove('on');
+          cell.classList.add('on');
+          show(id);
+        });
+        cell.append(h('span', 'name', def.name), h('span', 'ico emoji', POWER_ICONS[id]), pips(p.powers[id] ?? 0, def.max));
+        grid.append(cell);
       }
-      if (p.powerSpent > 0) {
-        box.append(
-          button(`Вернуть всё (${p.powerSpent} 🐟)`, 'btn secondary', async () => {
-            try {
-              render(await api!.refund());
-            } catch (e) {
-              toast(errorText(e));
-            }
-          }),
-        );
-      }
+      show(picked);
+      const panel = h('div', 'panel frame');
+      panel.style.padding = '10px';
+      panel.append(h('div', 'counter', `🐟 ${p.fish}`), reset, grid);
+      box.replaceChildren(panel, detail);
     };
     render(await api!.profile());
+  });
+}
+
+// What opens what, like the VS «Открыто» list: every cat and room with the
+// condition that opens it, ticked once it is open.
+function unlockScreen(): void {
+  screen('Открыто', async (box) => {
+    const p = api ? await api.profile() : null;
+    const rows: { done: boolean; what: string; icon: () => HTMLElement; detail: string }[] = [];
+    for (const id of cats.HERO_IDS) {
+      const def: cats.HeroDef = cats.HEROES[id];
+      const info = p?.heroes.find((x) => x.id === id);
+      const u: cats.HeroDef['unlock'] = def.unlock;
+      if (!u) continue;
+      const text = cats.unlockText(id);
+      const cond = 'fish' in u ? `Купите за ${u.fish} 🐟` : `${text[0].toUpperCase()}${text.slice(1)}${info ? `: ${info.have}/${info.need}` : ''}`;
+      rows.push({ done: !!info?.owned, what: cond, icon: () => catPicture(28, id), detail: `Открывает кота: ${def.name}` });
+    }
+    for (const id of cats.ROOM_IDS) {
+      const def = cats.ROOMS[id];
+      if (!def.after) continue;
+      const done = !!p?.rooms.find((r) => r.id === id)?.owned;
+      rows.push({ done, what: `Продержитесь 20 минут в комнате «${cats.ROOMS[def.after].name}»`, icon: () => h('span', 'ico emoji', '🚪'), detail: `Открывает комнату: ${def.name}` });
+    }
+    const detail = h('div', 'detail frame');
+    const list = h('ul', 'unlocks');
+    for (const r of rows) {
+      const li = h('li', r.done ? 'done' : '');
+      li.append(h('span', 'box', r.done ? '✓' : ''), h('span', 'what', r.what), r.icon());
+      li.onclick = () => {
+        const text = h('div', 'text');
+        text.append(h('b', '', r.what), h('span', 'hint', r.detail));
+        detail.replaceChildren(r.icon(), text);
+      };
+      list.append(li);
+    }
+    const panel = h('div', 'panel frame');
+    panel.style.padding = '10px';
+    panel.append(h('div', 'counter', `Открыто: ${rows.filter((r) => r.done).length} из ${rows.length}`), list);
+    box.replaceChildren(panel, detail);
+    (list.firstElementChild as HTMLElement | null)?.click();
   });
 }
 

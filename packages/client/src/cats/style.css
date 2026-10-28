@@ -1,22 +1,26 @@
-/* The game draws its own warm "kitchen" palette and ignores the Telegram theme:
-   the floor and sprites are light, so the interface matches them. */
+/* The interface follows Vampire Survivors: slate-blue panels in a gold
+   frame, blue buttons, red for going back, green for buying. It ignores the
+   Telegram theme so the colours stay the same in dark mode. */
 :root {
-  --ink: #2a2233;
-  --muted: #6d6476;
-  --paper: #fff8ee;
-  --card: #ffffff;
-  --line: #2a2233;
-  --accent: #ff8a3d;
+  --ink: #ffffff;
+  --muted: #c9cbe3;
+  --paper: #474c74;
+  --card: #565b85;
+  --line: #c8a95b;
+  --gold: #f2d335;
+  --accent: #2d4be0;
   --accent-ink: #ffffff;
-  --hp: #ff5468;
-  --xp: #7a5cff;
+  --red: #c8321f;
+  --green: #2e9e46;
+  --hp: #e02a2a;
+  --xp: #2d4be0;
   --ghost: #8f7bd9;
 }
 html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #e9dcc6;
+  background: #1b0608;
   color: var(--ink);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   touch-action: none;
@@ -178,3 +182,141 @@ html, body {
 .herocard .text span { color: var(--muted); font-size: 13px; }
 .herocard .lv { color: var(--accent); font-weight: 900; font-size: 13px; max-width: 110px; text-align: right; }
 .picks { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+/* ---------- Vampire Survivors look ---------- */
+.overlay {
+  background: radial-gradient(circle at 50% 35%, #8a1620 0%, #4a0910 55%, #1b0608 100%);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.overlay.level, .overlay.pausebox, .overlay.chest { background: rgba(10, 6, 20, .6); }
+.overlay h1 { color: #fff; text-shadow: 0 2px 0 #000; letter-spacing: .5px; }
+.overlay p { color: var(--muted); }
+.overlay .best { color: var(--gold); }
+.overlay .result { color: #fff; }
+.frame {
+  background: var(--paper); border: 3px solid var(--line); border-radius: 4px;
+  box-shadow: inset 0 0 0 2px #2c2f4a, 0 4px 0 #0008;
+}
+.btn {
+  border-radius: 6px; border: 3px solid var(--line); background: var(--accent); color: #fff;
+  font: 900 18px system-ui; text-transform: uppercase; letter-spacing: .5px;
+  box-shadow: inset 0 -4px 0 #0003, 0 3px 0 #0008; text-shadow: 0 2px 0 #0006;
+}
+.btn:active { box-shadow: inset 0 -2px 0 #0003, 0 1px 0 #0008; }
+.btn.secondary { background: var(--red); color: #fff; }
+.btn.green { background: var(--green); }
+.btn:disabled { filter: grayscale(.7) brightness(.8); }
+.tile {
+  border-radius: 6px; border: 3px solid var(--line); background: var(--accent); color: #fff;
+  box-shadow: inset 0 -3px 0 #0003, 0 3px 0 #0008; text-shadow: 0 1px 0 #0006;
+}
+.tile.green { background: var(--green); }
+.card { border-radius: 4px; border: 3px solid var(--line); background: #8a8a8a; color: #fff; box-shadow: 0 3px 0 #0008; }
+.card .text span { color: #fff; }
+.card .lv { color: var(--gold); }
+.card .head { display: flex; justify-content: space-between; gap: 8px; }
+.herocard { border-radius: 4px; border: 3px solid var(--line); background: var(--card); color: #fff; }
+.herocard.on { border-color: var(--gold); background: #636aa0; }
+.herocard .text span, .herocard .lv { color: var(--muted); }
+.herocard .lv { color: var(--gold); }
+.board li, .tasks li { border-radius: 4px; border-color: var(--line); background: var(--card); color: #fff; }
+.board li.me, .tasks li.new { background: #636aa0; }
+.board .score, .board li::before, .tasks li.done { color: var(--muted); }
+.item { border-radius: 4px; background: var(--card); color: #fff; }
+.item.on { background: #636aa0; }
+.up, .slot { background: var(--card); border-color: var(--line); color: #fff; }
+.slot { background: #0006; }
+.slot.evo { background: #7a6420; }
+.pause { border-radius: 6px; border: 3px solid var(--line); background: var(--accent); color: #fff; }
+.bar { border-radius: 2px; border-color: #000; background: #000a; }
+.bar.xp { height: 12px; border-color: var(--line); }
+.stats { color: #fff; text-shadow: 0 1px 2px #000; }
+.evos, .evos b { color: var(--muted); }
+.evos b { color: #fff; }
+.evos .done { color: var(--gold); }
+.credit { color: #c9a; }
+.toast { background: #000c; border: 2px solid var(--line); }
+.new-tag { color: var(--gold); font-weight: 900; font-size: 13px; white-space: nowrap; }
+
+/* Level squares under an icon, one per level, filled up to the level. */
+.pips { display: flex; gap: 2px; justify-content: center; }
+.pips i { width: 7px; height: 7px; background: #1d1f33; border: 1px solid var(--line); }
+.pips i.on { background: var(--gold); }
+
+/* What the cat carries: weapons on top, passives below, like VS. */
+.inv { display: flex; flex-direction: column; gap: 6px; padding: 8px; width: min(360px, 100%); box-sizing: border-box; }
+.inv .row { display: flex; gap: 6px; justify-content: flex-start; }
+.inv .cell { width: 44px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.inv .cell .ico { width: 30px; height: 30px; }
+.inv .cell .ico.emoji { font-size: 24px; line-height: 30px; }
+.inv .cell.empty { opacity: .35; }
+.inv .cell.empty::before { content: ''; width: 28px; height: 28px; border: 2px solid var(--line); background: #0004; }
+.inv .cell.evo .ico { filter: drop-shadow(0 0 4px var(--gold)); }
+
+/* Every stat of the cat, like the left panel of VS. */
+.statlist { display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; padding: 8px 10px; width: min(360px, 100%); box-sizing: border-box; font-size: 13px; text-align: left; }
+.statlist span { color: #fff; }
+.statlist b { color: #fff; text-align: right; font-weight: 700; }
+.statlist b.none { color: var(--muted); }
+.statlist .gap { grid-column: 1 / 3; height: 6px; }
+.luckhint { color: #fff !important; font-weight: 700; }
+
+/* Power Ups and the collection: a grid of cells and a panel about the one picked. */
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: 100%; }
+.grid.small { grid-template-columns: repeat(6, 1fr); }
+.cellbtn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px;
+  border-radius: 2px; border: 3px solid #8a8faf; background: #9a9a9a; color: #fff; font: 700 11px system-ui;
+  text-shadow: 0 1px 0 #0008; cursor: pointer; min-width: 0;
+}
+.cellbtn .name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cellbtn .ico { width: 30px; height: 30px; }
+.cellbtn .ico.emoji { font-size: 24px; line-height: 30px; }
+.cellbtn.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
+.cellbtn.unknown { background: #3a3f63; }
+.cellbtn.unknown .q { font: 900 22px system-ui; color: #9aa0c8; line-height: 30px; }
+.cellbtn.done { background: #7d8a6e; }
+.detail { display: flex; gap: 10px; align-items: center; padding: 10px; width: 100%; box-sizing: border-box; text-align: left; min-height: 74px; }
+.detail .ico { width: 40px; height: 40px; flex: none; }
+.detail .text { flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.detail .text b { color: var(--gold); font-size: 15px; }
+.detail .text .hint { color: #f0a84a; }
+.detail .buy { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #fff; font-weight: 800; }
+.counter { font-size: 22px; font-weight: 800; color: #fff; }
+
+/* The unlock list: a box ticked when it is done. */
+.unlocks { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.unlocks li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card); border: 2px solid #2c2f4a; text-align: left; font-size: 14px; color: #fff; }
+.unlocks li .box { width: 20px; height: 20px; flex: none; border: 3px solid #8f7436; background: #2a1a2e; display: grid; place-items: center; color: var(--gold); font-weight: 900; }
+.unlocks li .what { flex: 1; }
+.unlocks li .ico { width: 28px; height: 28px; }
+.unlocks li .ico.emoji { font-size: 22px; line-height: 28px; }
+.unlocks li.done { background: #4f6a4f; }
+
+/* A chest opens: it shakes, bursts, and what it held comes out one by one. */
+.chestbox { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px; width: min(340px, 100%); box-sizing: border-box; }
+.chestbox .chest { font-size: 72px; line-height: 1; animation: shake .5s ease-in-out 2; }
+.chestbox .chest.open { animation: burst .5s ease-out forwards; }
+@keyframes shake { 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+@keyframes burst { 0% { transform: scale(1); } 40% { transform: scale(1.4); filter: brightness(2); } 100% { transform: scale(1); } }
+.chestbox .rays { position: absolute; width: 180px; height: 180px; border-radius: 50%; background: radial-gradient(circle, #fff6 0%, #f2d33555 40%, transparent 70%); animation: glow 1.2s ease-in-out infinite; pointer-events: none; }
+@keyframes glow { 50% { transform: scale(1.15); opacity: .7; } }
+.chestbox .loot { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.chestbox .loot > div { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--card); border: 2px solid var(--line); animation: pop .3s ease-out backwards; color: #fff; text-align: left; }
+.chestbox .loot b { flex: 1; }
+.chestbox .loot .lv { color: var(--gold); font-weight: 900; }
+.chestbox .stage { position: relative; display: grid; place-items: center; height: 110px; }
+.overlay.chest { z-index: 5; }
+.tiles.three { grid-template-columns: 1fr 1fr 1fr; }
+.btn.small { text-transform: none; }
+.cellbtn.evo:not(.unknown) { background: #8a7a40; }
+.cellbtn.evo:not(.unknown)::after { content: '★'; color: var(--gold); font-size: 12px; line-height: 1; margin-top: -2px; }
+.cellbtn.evo.unknown .q { color: #c8a95b; }
+/* Squares wrap four to a row, as under the VS weapon icons. */
+.pips { flex-wrap: wrap; max-width: 40px; }
+.pips i { width: 6px; height: 6px; }
+.overlay.pausebox { background: rgba(10, 6, 20, .88); z-index: 4; }
+.overlay.level { z-index: 3; }
+.dmg.frame, .evos.frame { padding: 8px 10px; box-sizing: border-box; }
+.dmg .head { color: var(--gold); }
+.dmg span { color: #fff; }
