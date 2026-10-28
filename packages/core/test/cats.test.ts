@@ -141,18 +141,21 @@ test('a chest evolves a ready weapon, otherwise levels up items', () => {
   const run = new CatRun(21);
   run.items.claws = 8;
   run.items.box = 1; // not the claws' passive
-  const elite = () => {
-    // An elite drops its chest under the cat.
+  const elite = (evo: boolean) => {
+    // An elite drops its chest under the cat; only one that came at 10:00
+    // or later can evolve.
     const p = run.player;
-    run.pickups.push({ id: 9999, kind: 'chest', x: p.x, y: p.y, got: false });
+    run.pickups.push({ id: 9999, kind: 'chest', x: p.x, y: p.y, got: false, evo });
     run.step(0);
   };
-  elite();
+  elite(true);
   assert.equal(run.evolved.claws, undefined);
   assert.ok(run.lvl('box') >= 2, 'the chest levelled up the only open item');
   run.items.belly = 1;
   assert.deepEqual(run.evolvable(), ['claws']);
-  elite();
+  elite(false);
+  assert.equal(run.evolved.claws, undefined, 'an early chest does not evolve');
+  elite(true);
   assert.equal(run.evolved.claws, true);
   assert.deepEqual(run.evolvable(), []);
 });
@@ -295,4 +298,54 @@ test('enemies keep their strength all run; swarms and the wall come by the wave 
   assert.ok(swarm > 0, 'a swarm flew by');
   assert.ok(wall > 0, 'the wall closed in');
   for (const k of ['mouse', 'redmouse', 'dust', 'mite', 'wetbot', 'robot', 'rat']) assert.ok(seen.has(k), k);
+});
+
+test('a pot passes through as many enemies as the VS axe pierces', () => {
+  for (const [lvl, hits] of [[1, 3], [8, 7]]) {
+    const run = new CatRun(1, { events: false }) as any;
+    run.items = { pot: lvl };
+    run.enemies = [];
+    for (let k = 0; k < 40; k++) {
+      const e = run.spawn('bigvac');
+      e.hp = e.maxHp = 1e9;
+      e.r = 6;
+      e.x = run.player.x;
+      e.y = run.player.y - 10 - k * 4;
+    }
+    run.fire('pot', run.weaponStats('pot'), 0, 1, 0);
+    const shot = run.shots[0];
+    for (let t = 0; t < 60 && shot.life > 0; t++) run.moveShots();
+    assert.equal(shot.hits.length, hits, `level ${lvl}`);
+  }
+});
+
+test('things on the floor come from breakables, the rare ones from a cat level', () => {
+  const run = new CatRun(3, { events: false });
+  const got = new Set<string>();
+  let props = 0;
+  for (let i = 0; i < 8 * 60 * 30 && !run.over; i++) {
+    run.step(0);
+    run.player.hp = run.player.maxHp;
+    while (run.pending) run.choose(0);
+    props = Math.max(props, run.props.length);
+    for (const it of run.pickups) if (it.kind !== 'chest') got.add(`${it.kind}@${run.level}`);
+  }
+  assert.ok(props > 0, 'a breakable turned up');
+  for (const k of got) {
+    const [kind, level] = k.split('@');
+    assert.ok(Number(level) >= cats.PICKUP_TABLE[kind as keyof typeof cats.PICKUP_TABLE].level, k);
+  }
+});
+
+test('the boss has health per cat level, like the elites', () => {
+  const run = new CatRun(4, { events: false });
+  run.level = 50;
+  while (run.tick < cats.BOSS_TICK) {
+    run.step(0);
+    run.player.hp = run.player.maxHp;
+    while (run.pending) run.choose(0);
+    run.level = 50;
+  }
+  const boss = run.enemies.find((e) => e.kind === 'mop')!;
+  assert.equal(boss.maxHp, cats.ENEMIES.mop.hp * 50);
 });

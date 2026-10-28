@@ -49,7 +49,7 @@ export type EnemyKind =
 export interface EnemyDef {
   name: string;
   r: number;
-  hp: number; // the same all run, as in VS; elites and the wall: per cat level
+  hp: number; // the same all run, as in VS; elites, bosses and the wall: per cat level
   speed: number;
   dmg: number;
   xp: number;
@@ -77,7 +77,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   brush: { name: 'Турбощётка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
   bigvac: { name: 'Пылесос-гигант', r: 28, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
   bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 75, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 9000, speed: 95, dmg: 30, xp: 0, move: 'chase' },
+  mop: { name: 'Швабра', r: 38, hp: 250, speed: 95, dmg: 30, xp: 0, move: 'chase' }, // hp per cat level
 
   pigeon: { name: 'Голубь', r: 11, hp: 1, speed: 110, dmg: 4, xp: 1, move: 'flock', fly: true },
   crow: { name: 'Ворона', r: 12, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
@@ -90,7 +90,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   hound: { name: 'Овчарка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'dash' },
   combine: { name: 'Садовый комбайн', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
   bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 80, dmg: 14, xp: 0, move: 'dash' }, // hp per cat level
-  blower: { name: 'Листодув', r: 40, hp: 18000, speed: 80, dmg: 35, xp: 0, move: 'chase' },
+  blower: { name: 'Листодув', r: 40, hp: 400, speed: 80, dmg: 35, xp: 0, move: 'chase' }, // hp per cat level
 
   minibot: { name: 'Мини-робот', r: 8, hp: 1, speed: 95, dmg: 4, xp: 1, move: 'chase' },
   redbot: { name: 'Злой мини-робот', r: 9, hp: 4, speed: 95, dmg: 4, xp: 1, move: 'chase' },
@@ -103,7 +103,7 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   cyclone: { name: 'Циклонный пылесос', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
   tank: { name: 'Пылесос-бак', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
   industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 60, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  king: { name: 'Король пылесосов', r: 44, hp: 36000, speed: 70, dmg: 40, xp: 0, move: 'chase' },
+  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 70, dmg: 40, xp: 0, move: 'chase' }, // hp per cat level
 
   // The flower wall of Mad Forest: a ring that closes in on the cat. Health
   // per cat level; it gives no gems and goes away when its time is up.
@@ -346,11 +346,12 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     { dmg: 10, cd: 4.5, amount: 1, area: 1, speed: 1, duration: 2, pierce: 0 },
     [{ amount: 1, area: 0.2 }, { dmg: 10, duration: 0.5 }, { amount: 1, area: 0.2 }, { dmg: 10, duration: 0.3 }, { amount: 1, area: 0.2 }, { dmg: 5, duration: 0.3 }, { dmg: 5, area: 0.2 }],
   ),
-  // Axe: pots fly up and fall in an arc, through several enemies.
+  // Axe: pots fly up and fall in an arc, through several enemies (3 at
+  // first, as the VS pierce 3: it passes through 2).
   pot: weapon(
     'Цветочный горшок',
     'Горшки летят вверх и падают по дуге',
-    { dmg: 20, cd: 4, amount: 1, area: 1, speed: 1, duration: 0, pierce: 3 },
+    { dmg: 20, cd: 4, amount: 1, area: 1, speed: 1, duration: 0, pierce: 2 },
     [{ amount: 1 }, { dmg: 20 }, { pierce: 2 }, { amount: 1 }, { dmg: 20 }, { pierce: 2 }, { dmg: 20 }],
   ),
   // Lightning ring: sparks strike random enemies on screen.

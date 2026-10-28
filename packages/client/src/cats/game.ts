@@ -145,6 +145,8 @@ const BOSS_TEXT: Record<cats.RoomId, [string, string]> = {
   warehouse: ['Идёт Король пылесосов!', 'Король свергнут!'],
 };
 const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟', chest: '🎁' };
+// Breakable things on the floor, one kind per room.
+const PROP_ICON: Record<cats.RoomId, string> = { flat: '🏺', yard: '🪴', warehouse: '📦' };
 const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟', chest: '' };
 const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
   sofa: ['#6f8fc9', '#8eaadb', '#46639a'],
@@ -155,7 +157,7 @@ const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
   car: ['#4f7fd0', '#a9c6f0', '#2f4f8a'],
   shelf: ['#8a6a4a', '#d7b98a', '#5a4430'],
 };
-const VIEW_RADIUS = 470; // world units from the cat to the nearest screen edge, at most
+const VIEW_RADIUS = 500; // world units from the cat to a corner of the screen, at most
 
 export class Game {
   readonly rec: InstanceType<typeof cats.Recorder>;
@@ -282,8 +284,10 @@ export class Game {
     this.H = window.innerHeight;
     this.cv.width = Math.round(this.W * this.dpr);
     this.cv.height = Math.round(this.H * this.dpr);
-    // Enemies appear 500 units away, so the screen must not show further than that.
-    this.zoom = Math.max(this.W, this.H) / 2 > VIEW_RADIUS ? Math.max(this.W, this.H) / 2 / VIEW_RADIUS : 1;
+    // World units per screen pixel. Enemies appear 520 units away, so a big
+    // screen is zoomed in until its corners are at most VIEW_RADIUS away.
+    const corner = Math.hypot(this.W, this.H) / 2;
+    this.zoom = corner > VIEW_RADIUS ? VIEW_RADIUS / corner : 1;
     this.floor = null;
   }
 
@@ -482,13 +486,13 @@ export class Game {
   }
 
   private blitCat(hero: cats.HeroId, x: number, y: number, size: number, flip: boolean): void {
-    const px = size * this.zoom * this.dpr;
+    const px = (size / this.zoom) * this.dpr;
     this.ctx.drawImage(catSprite(hero, px, flip), x - size / 2, y - size / 2, size, size);
   }
 
   private blit(id: SpriteId, x: number, y: number, size: number, flip = false, flash = false, tint?: string): void {
     const c = this.ctx;
-    const px = size * this.zoom * this.dpr;
+    const px = (size / this.zoom) * this.dpr;
     const img = flash ? flashSprite(id, px, flip) : sprite(id, px, flip, tint);
     c.drawImage(img, x - size / 2, y - size / 2, size, size);
   }
@@ -683,6 +687,7 @@ export class Game {
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = '22px system-ui, sans-serif';
+    for (const pr of run.props) c.fillText(PROP_ICON[run.room], pr.x, pr.y);
     for (const it of run.pickups) c.fillText(PICKUP_ICON[it.kind], it.x, it.y + Math.sin(t * 4 + it.id) * 2);
     for (const h of run.hazards) if (h.kind === 'leaf') c.fillText('🍂', h.x, h.y);
     c.textBaseline = 'alphabetic';
