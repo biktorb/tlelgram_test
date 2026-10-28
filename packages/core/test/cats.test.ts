@@ -376,3 +376,43 @@ test('cards come up as often as the rarity of their VS item', () => {
   assert.ok(a > 3100 && a < 3550, `a came ${a} times`);
   assert.deepEqual(new Rng(1).weighted(items, 5, () => 1).sort(), ['a', 'b']);
 });
+
+test('levels cost as in the VS code: level² × 5, × 6.5 from 20, × 8 from 40', () => {
+  assert.deepEqual([1, 2, 3, 19].map(cats.xpToNext), [5, 15, 25, 185]);
+  assert.equal(cats.xpToNext(20), 20 * 20 * 6.5 - 19 * 19 * 5);
+  assert.equal(cats.xpToNext(21) - cats.xpToNext(20 + 2) + 13, 0);
+  assert.equal(cats.xpToNext(40), 40 * 40 * 8 - 39 * 39 * 6.5);
+});
+
+test('enemies come just beyond the screen edge, and one left far behind comes back ahead', () => {
+  const run = new CatRun(3);
+  for (let i = 0; i < 60; i++) run.step(0);
+  for (const en of run.enemies) {
+    const dx = Math.abs(en.x - run.player.x);
+    const dy = Math.abs(en.y - run.player.y);
+    assert.ok(dx > cats.SCREEN_X || dy > cats.SCREEN_Y, 'not on screen');
+    assert.ok(dx < cats.SCREEN_X + 200 && dy < cats.SCREEN_Y + 200, 'not far');
+  }
+  const en = run.enemies[0];
+  en.x = run.player.x - 2000;
+  en.y = run.player.y;
+  run.step(0);
+  assert.ok(en.x > run.player.x, 'brought round to the other side');
+});
+
+test('a hit pushes an enemy back by its own knockback; a heavy one only stops', () => {
+  const run = new CatRun(5);
+  for (let i = 0; i < 5; i++) run.step(0);
+  const [light, heavy] = run.enemies;
+  light.kind = 'mouse';
+  heavy.kind = 'bigvac';
+  for (const [en, y] of [[light, 0], [heavy, 100]] as const) {
+    en.x = run.player.x + 200;
+    en.y = run.player.y + y;
+    en.knock = 4;
+    en.knockPow = 1;
+  }
+  run.step(0);
+  assert.ok(light.x > run.player.x + 200, 'the mouse is pushed away');
+  assert.ok(heavy.x <= run.player.x + 200, 'the giant vacuum is not pushed');
+});

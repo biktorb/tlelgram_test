@@ -157,7 +157,6 @@ const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
   car: ['#4f7fd0', '#a9c6f0', '#2f4f8a'],
   shelf: ['#8a6a4a', '#d7b98a', '#5a4430'],
 };
-const VIEW_RADIUS = 500; // world units from the cat to a corner of the screen, at most
 
 export class Game {
   readonly rec: InstanceType<typeof cats.Recorder>;
@@ -284,10 +283,10 @@ export class Game {
     this.H = window.innerHeight;
     this.cv.width = Math.round(this.W * this.dpr);
     this.cv.height = Math.round(this.H * this.dpr);
-    // World units per screen pixel. Enemies appear 520 units away, so a big
-    // screen is zoomed in until its corners are at most VIEW_RADIUS away.
-    const corner = Math.hypot(this.W, this.H) / 2;
-    this.zoom = corner > VIEW_RADIUS ? VIEW_RADIUS / corner : 1;
+    // World units per screen pixel: the screen shows as much as the sim
+    // counts as on screen (12 cats across a phone) and no more, so enemies
+    // always come from beyond its edge.
+    this.zoom = Math.min((2 * cats.SCREEN_X) / this.W, (2 * cats.SCREEN_Y) / this.H);
     this.floor = null;
   }
 
