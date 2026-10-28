@@ -145,10 +145,10 @@ const BOSS_TEXT: Record<cats.RoomId, [string, string]> = {
   yard: ['Свистит Соловей-Разбойник!', 'Соловей связан!'],
   warehouse: ['Идёт Змей Горыныч!', 'Змей Горыныч повержен!'],
 };
-const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🥧', catnip: '🌪️', alarm: '🔔', plug: '🌿', coin: '🪙', chest: '🎁' };
+const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🥧', catnip: '🌪️', alarm: '🔔', plug: '🌿', coin: '💰', chest: '🎁' };
 // Breakable things on the ground, one kind per location.
 const PROP_ICON: Record<cats.RoomId, string> = { flat: '🧺', yard: '🛢️', warehouse: '⚱️' };
-const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Вихрь!', alarm: 'Набат!', plug: 'Нечисть уснула!', coin: '+5 🪙', chest: '' };
+const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Вихрь!', alarm: 'Набат!', plug: 'Нечисть уснула!', coin: '+5 💰', chest: '' };
 // Obstacles keep the furniture kinds of the sim: in the forest a sofa is a
 // fallen log, a table a boulder, a wardrobe a fir; on the road a flowerbed
 // is bushes, a bench a cart, a car a haystack; in the castle shelves are
@@ -741,7 +741,25 @@ export class Game {
     c.textBaseline = 'middle';
     c.font = '22px system-ui, sans-serif';
     for (const pr of run.props) c.fillText(PROP_ICON[run.room], pr.x, pr.y);
-    for (const it of run.pickups) c.fillText(PICKUP_ICON[it.kind], it.x, it.y + Math.sin(t * 4 + it.id) * 2);
+    for (const it of run.pickups) {
+      const y = it.y + Math.sin(t * 4 + it.id) * 2;
+      if (it.kind !== 'coin') {
+        c.fillText(PICKUP_ICON[it.kind], it.x, y);
+        continue;
+      }
+      // A gold coin, drawn: the coin emoji is silver on iPhones.
+      c.fillStyle = '#f2c230';
+      c.strokeStyle = '#a8740f';
+      c.lineWidth = 2.5;
+      c.beginPath();
+      c.arc(it.x, y, 9, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
+      c.fillStyle = '#ffe58a';
+      c.beginPath();
+      c.arc(it.x - 2.5, y - 2.5, 3.5, 0, Math.PI * 2);
+      c.fill();
+    }
     for (const h of run.hazards) if (h.kind === 'leaf') c.fillText('🍂', h.x, h.y);
     c.textBaseline = 'alphabetic';
 
