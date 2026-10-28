@@ -143,7 +143,7 @@ test('a chest evolves a ready weapon, otherwise levels up items', () => {
   run.items.claws = 8;
   run.items.box = 1; // not the claws' passive
   const elite = (evo: boolean) => {
-    // An elite drops its chest under the cat; only one that came at 10:00
+    // An elite drops its chest under the cat; only one that came at 7:00
     // or later can evolve.
     const p = run.player;
     run.pickups.push({ id: 9999, kind: 'chest', x: p.x, y: p.y, got: false, evo });
