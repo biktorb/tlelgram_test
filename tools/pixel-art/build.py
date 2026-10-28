@@ -7,7 +7,7 @@ import sys
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
-import forest, road, castle, weapons, world, bogatyr, ilya_vs, vasilisa_vs  # noqa: E402
+import forest, road, castle, weapons, world, bogatyr, ilya_vs, vasilisa_vs, icons, scenes  # noqa: E402
 from vs import VP  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(__file__), '../../packages/client/src/cats/art')
@@ -33,6 +33,10 @@ def pictures():
     for name, f in world.SPRITES.items():
         pics[name] = f().image()
     for name, f in world.IMAGES.items():
+        pics[name] = f()
+    for name, f in icons.ITEMS.items():
+        pics['ico:' + name] = f().image()
+    for name, f in scenes.SCENES.items():
         pics[name] = f()
     return pics
 

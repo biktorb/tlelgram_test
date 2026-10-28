@@ -145,10 +145,12 @@ const BOSS_TEXT: Record<cats.RoomId, [string, string]> = {
   yard: ['Свистит Соловей-Разбойник!', 'Соловей связан!'],
   warehouse: ['Идёт Змей Горыныч!', 'Змей Горыныч повержен!'],
 };
+// Atlas icons of the pickups; the emoji are the fallback.
+const PICKUP_ART: Record<cats.PickupKind, string> = { food: 'pie', catnip: 'whirl', alarm: 'bell', plug: 'herb', coin: 'coin', chest: 'chest' };
 const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🥧', catnip: '🌪️', alarm: '🔔', plug: '🌿', coin: '💰', chest: '🎁' };
 // Breakable things on the ground, one kind per location.
 const PROP_ICON: Record<cats.RoomId, string> = { flat: '🧺', yard: '🛢️', warehouse: '⚱️' };
-const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Вихрь!', alarm: 'Набат!', plug: 'Нечисть уснула!', coin: '+5 💰', chest: '' };
+const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Вихрь!', alarm: 'Набат!', plug: 'Нечисть уснула!', coin: '+5 злата', chest: '' };
 // Obstacles keep the furniture kinds of the sim: in the forest a sofa is a
 // fallen log, a table a boulder, a wardrobe a fir; on the road a flowerbed
 // is bushes, a bench a cart, a car a haystack; in the castle shelves are
@@ -440,7 +442,7 @@ export class Game {
         break;
       case 'chest': {
         const p = this.run.player;
-        const lines = e.evolved.length ? e.evolved.map((w) => `✨ ${cats.EVOLUTIONS[w].name}!`) : e.items.map((k) => `${cats.cardName(k)} +1`);
+        const lines = e.evolved.length ? e.evolved.map((w) => `★ ${cats.EVOLUTIONS[w].name}!`) : e.items.map((k) => `${cats.cardName(k)} +1`);
         lines.forEach((s, i) => this.text(p.x, p.y - 50 - i * 22, s, e.evolved.length ? '#ffcf3f' : '#ffe08a', e.evolved.length ? 24 : 17, 1.6));
         this.burst(p.x, p.y, 30, '#ffcf3f');
         break;
@@ -812,6 +814,12 @@ export class Game {
     }
     for (const it of run.pickups) {
       const y = it.y + Math.sin(t * 4 + it.id) * 2;
+      const ico = art(`ico:${PICKUP_ART[it.kind]}`);
+      if (ico) {
+        const s = it.kind === 'coin' ? 20 : 26;
+        c.drawImage(ico[0], ...ico[1], it.x - s / 2, y - s / 2, s, s);
+        continue;
+      }
       if (it.kind !== 'coin') {
         c.fillText(PICKUP_ICON[it.kind], it.x, y);
         continue;
@@ -829,7 +837,12 @@ export class Game {
       c.arc(it.x - 2.5, y - 2.5, 3.5, 0, Math.PI * 2);
       c.fill();
     }
-    for (const h of run.hazards) if (h.kind === 'leaf') c.fillText('🍂', h.x, h.y);
+    const leaf = art('ico:leaf');
+    for (const h of run.hazards) {
+      if (h.kind !== 'leaf') continue;
+      if (leaf) c.drawImage(leaf[0], ...leaf[1], h.x - 11, h.y - 11, 22, 22);
+      else c.fillText('🍂', h.x, h.y);
+    }
     c.textBaseline = 'alphabetic';
 
     // Shadows first, then bodies, so crowds read clearly.
