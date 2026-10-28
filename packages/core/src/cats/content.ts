@@ -58,59 +58,64 @@ export interface EnemyDef {
   // or following the segment ahead of it (the hose).
   move: 'chase' | 'charge' | 'flock' | 'dash' | 'follow';
   fly?: boolean; // passes over furniture
+  // Knockback taken, as the enemy's own in VS: a hit sends it back at its
+  // own speed times this for 0.12 s. Heavy ones barely move.
+  kb: number;
 }
 
 // Every room has the cast of Mad Forest in its own skin, with the numbers of
-// the VS wiki: health and damage at 70%, speed at 65% (our map is smaller).
+// the VS wiki: health and damage at 70%. Speed as in the game's code: an
+// enemy walks 0.2541 px/s per point of its speed and the hero 90.75 px/s, so
+// with the cat at 136 (our units are 1.5 VS pixels) a point of speed is 0.381.
 // Bat 1 hp → mouse, red-eyed bat 5 → angry mouse, zombie 10, skeleton 15,
 // ghost 10 (fast), gray mudman 70, green mudman 150, giant bat 270,
 // werewolf 180, giant mummy 500. Damage 5 → 4, 10 → 7, 14 → 10, 20 → 14.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
-  mouse: { name: 'Мышь', r: 10, hp: 1, speed: 90, dmg: 4, xp: 1, move: 'chase' },
-  redmouse: { name: 'Злая мышь', r: 11, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
-  dust: { name: 'Комок пыли', r: 13, hp: 7, speed: 65, dmg: 7, xp: 1, move: 'chase' },
-  mite: { name: 'Пылевой клещ', r: 13, hp: 10, speed: 65, dmg: 7, xp: 2, move: 'chase' },
-  moth: { name: 'Моль', r: 11, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
-  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 70, dmg: 7, xp: 2.5, move: 'charge' },
-  wetbot: { name: 'Мокрый робот', r: 20, hp: 105, speed: 65, dmg: 7, xp: 2.5, move: 'charge' },
-  rat: { name: 'Крыса', r: 16, hp: 189, speed: 90, dmg: 7, xp: 2.5, move: 'chase' },
-  brush: { name: 'Турбощётка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
-  bigvac: { name: 'Пылесос-гигант', r: 28, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 250, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
+  mouse: { name: 'Мышь', r: 10, hp: 1, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  redmouse: { name: 'Злая мышь', r: 11, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  dust: { name: 'Комок пыли', r: 13, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
+  mite: { name: 'Пылевой клещ', r: 13, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  moth: { name: 'Моль', r: 11, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 41, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  wetbot: { name: 'Мокрый робот', r: 20, hp: 105, speed: 38, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  rat: { name: 'Крыса', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'chase' },
+  brush: { name: 'Турбощётка', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
+  bigvac: { name: 'Пылесос-гигант', r: 28, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Швабра', r: 38, hp: 250, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
-  pigeon: { name: 'Голубь', r: 11, hp: 1, speed: 110, dmg: 4, xp: 1, move: 'flock', fly: true },
-  crow: { name: 'Ворона', r: 12, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
-  trimmer: { name: 'Триммер', r: 15, hp: 7, speed: 65, dmg: 7, xp: 1, move: 'chase' },
-  goose: { name: 'Гусь', r: 16, hp: 10, speed: 65, dmg: 7, xp: 2, move: 'chase' },
-  wasp: { name: 'Оса', r: 9, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
-  mower: { name: 'Газонокосилка', r: 22, hp: 50, speed: 60, dmg: 7, xp: 2.5, move: 'chase' },
-  tractor: { name: 'Мини-трактор', r: 26, hp: 105, speed: 55, dmg: 7, xp: 2.5, move: 'charge' },
-  dog: { name: 'Пёс', r: 16, hp: 189, speed: 80, dmg: 7, xp: 2.5, move: 'dash' }, // lunges, so a little slower
-  hound: { name: 'Овчарка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'dash' },
-  combine: { name: 'Садовый комбайн', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'dash' }, // hp per cat level
-  blower: { name: 'Листодув', r: 40, hp: 400, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
+  pigeon: { name: 'Голубь', r: 11, hp: 1, speed: 64, dmg: 4, xp: 1, kb: 1, move: 'flock', fly: true },
+  crow: { name: 'Ворона', r: 12, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  trimmer: { name: 'Триммер', r: 15, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
+  goose: { name: 'Гусь', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  wasp: { name: 'Оса', r: 9, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  mower: { name: 'Газонокосилка', r: 22, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
+  tractor: { name: 'Мини-трактор', r: 26, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  dog: { name: 'Пёс', r: 16, hp: 189, speed: 47, dmg: 7, xp: 2.5, kb: 0.1, move: 'dash' }, // lunges, so a little slower
+  hound: { name: 'Овчарка', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'dash' },
+  combine: { name: 'Садовый комбайн', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'dash' }, // hp per cat level
+  blower: { name: 'Листодув', r: 40, hp: 400, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
-  minibot: { name: 'Мини-робот', r: 8, hp: 1, speed: 95, dmg: 4, xp: 1, move: 'chase' },
-  redbot: { name: 'Злой мини-робот', r: 9, hp: 4, speed: 95, dmg: 4, xp: 1, move: 'chase' },
-  hose: { name: 'Шланг', r: 12, hp: 7, speed: 70, dmg: 4, xp: 1, move: 'follow' },
-  scrubber: { name: 'Поломойка', r: 16, hp: 10, speed: 65, dmg: 7, xp: 2, move: 'chase' },
-  drone: { name: 'Дрон', r: 10, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
-  washer: { name: 'Моющий пылесос', r: 20, hp: 50, speed: 60, dmg: 7, xp: 2.5, move: 'chase' },
-  steamer: { name: 'Пароочиститель', r: 24, hp: 105, speed: 55, dmg: 7, xp: 2.5, move: 'charge' }, // a chaser corners the cat in the hall
-  roller: { name: 'Робот-полотёр', r: 16, hp: 189, speed: 90, dmg: 7, xp: 2.5, move: 'charge' },
-  cyclone: { name: 'Циклонный пылесос', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
-  tank: { name: 'Пылесос-бак', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
+  minibot: { name: 'Мини-робот', r: 8, hp: 1, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  redbot: { name: 'Злой мини-робот', r: 9, hp: 4, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  hose: { name: 'Шланг', r: 12, hp: 7, speed: 41, dmg: 4, xp: 1, kb: 0.8, move: 'follow' },
+  scrubber: { name: 'Поломойка', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  drone: { name: 'Дрон', r: 10, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  washer: { name: 'Моющий пылесос', r: 20, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
+  steamer: { name: 'Пароочиститель', r: 24, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' }, // a chaser corners the cat in the hall
+  roller: { name: 'Робот-полотёр', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'charge' },
+  cyclone: { name: 'Циклонный пылесос', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
+  tank: { name: 'Пылесос-бак', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
   // The flower wall of Mad Forest: a ring that closes in on the cat. Health
   // per cat level; it barely hurts, it hems the cat in. It gives no gems and
   // goes away when its time is up.
-  wall: { name: 'Стена пыли', r: 16, hp: 21, speed: 22, dmg: 1, xp: 0, move: 'chase', fly: true },
+  wall: { name: 'Стена пыли', r: 16, hp: 21, speed: 8, dmg: 1, xp: 0, kb: 1, move: 'chase', fly: true },
   // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
-  cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 230, dmg: 99999, xp: 0, move: 'chase' },
+  cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 200, dmg: 99999, xp: 0, kb: 0, move: 'chase' },
 };
 
 export type RoomId = 'flat' | 'yard' | 'warehouse';
@@ -255,14 +260,14 @@ export const BASE_STATS: Stats = {
   maxHp: 100,
   recovery: 0,
   armor: 0,
-  move: 150,
+  move: 136, // VS: 90.75 px/s in Mad Forest, and our unit is 1.5 VS pixels
   might: 1,
   area: 1,
   speed: 1,
   duration: 1,
   amount: 0,
   cooldown: 1,
-  magnet: 80,
+  magnet: 45, // VS: 30 px, plus the gem's own 10 (in the sim)
   luck: 1,
   growth: 1,
 };
@@ -389,7 +394,7 @@ export const PASSIVES: Record<PassiveId, PassiveDef> = {
   paws: { name: 'Ловкие лапы', max: 5, per: { speed: 0.1 }, desc: 'Скорость снарядов +10%' },
   patience: { name: 'Долгое мурчание', max: 5, per: { duration: 0.1 }, desc: 'Атаки длятся дольше на 10%' },
   purr: { name: 'Мурчалка', max: 5, per: { recovery: 0.2 }, desc: '+0,2 здоровья в секунду' },
-  catnip: { name: 'Мята в кармане', max: 5, per: { magnet: 24 }, desc: 'Радиус сбора кристаллов +30%' },
+  catnip: { name: 'Мята в кармане', max: 5, per: {}, desc: 'Радиус сбора кристаллов: +50%, а на 5-м уровне ×4' }, // as Attractorb, in CatRun.recompute
   bigpaws: { name: 'Большие лапы', max: 5, per: { area: 0.1 }, desc: 'Область атак +10%' },
   pack: { name: 'Кошачья стая', max: 2, per: { amount: 1 }, desc: '+1 снаряд ко всему оружию' },
   food: { name: 'Премиальный корм', max: 5, per: { might: 0.1 }, desc: 'Урон +10%' },
@@ -461,11 +466,14 @@ export function cardText(id: CardId, level: number): string {
   return EXTRAS[id].desc;
 }
 
-// Experience to go from `level` to the next, as in Vampire Survivors.
+// Experience to go from `level` to the next, as in Vampire Survivors: its
+// code wants level² × 5 in all to finish a level, × 6.5 from level 20 and
+// × 8 from 40, so the step is 10 more each level up to 20, then 13, then 16.
+function xpTotal(level: number): number {
+  return level * level * Math.min(8, 5 + 1.5 * Math.floor(level / 20));
+}
 export function xpToNext(level: number): number {
-  if (level < 20) return 5 + (level - 1) * 10;
-  if (level < 40) return 195 + (level - 20) * 13 + (level === 20 ? 600 : 0);
-  return 455 + (level - 40) * 16 + (level === 40 ? 2400 : 0);
+  return xpTotal(level) - xpTotal(level - 1);
 }
 
 // The cats, like the heroes of VS: own starting weapon and stats, and a
@@ -501,7 +509,7 @@ export const HEROES = {
     name: 'Барсик',
     title: 'пухлый мейн-кун',
     weapon: 'yarn',
-    stats: { maxHp: 160, move: 150 * 0.85 },
+    stats: { maxHp: 160, move: 136 * 0.85 },
     bonus: '+10% области атак, +20% с 10 уровня, +30% с 20-го',
     unlock: { surviveMin: 10 },
   },
@@ -509,7 +517,7 @@ export const HEROES = {
     name: 'Снежок',
     title: 'шустрый сфинкс',
     weapon: 'fish',
-    stats: { maxHp: 80, move: 150 * 1.25 },
+    stats: { maxHp: 80, move: 136 * 1.25 },
     bonus: '+1 снаряд ко всему оружию с 20 уровня',
     unlock: { kills: 5000 },
   },

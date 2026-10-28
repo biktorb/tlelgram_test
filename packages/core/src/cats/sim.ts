@@ -35,8 +35,9 @@ import { dcos, dsin, len } from './math.ts';
 // longer be replayed to what really happened, only their stored results
 // stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33),
 // 4: floor things from breakables, evolutions from 10:00, boss per level,
-// 5: numbers from the game's own data (waves, elites, XP, the wall, cards).
-export const SIM_VERSION = 5;
+// 5: numbers from the game's own data (waves, elites, XP, the wall, cards),
+// 6: numbers from the game's code (speeds, view, spawning, knockback, magnet).
+export const SIM_VERSION = 6;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
@@ -55,16 +56,34 @@ export const EVOLVE_TICK = 10 * MINUTE;
 // dust bunny with a chest.
 export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 18].map((m) => m * MINUTE);
 export const MAX_ENEMIES = 300; // more than this crawls on older phones
-export const SPAWN_DISTANCE = 520; // just outside a phone screen
-export const MAX_GEMS = 250; // further gems merge into one
-const DESPAWN_DISTANCE = 1400;
+export const MAX_GEMS = 400; // further gems merge into one, as in VS
+const DESPAWN_DISTANCE = 1400; // breakables further than this go
 const KNOCKBACK_DECAY = 0.8777435898906345; // 0.02 per second, per tick
 const CELL = 40;
 const SEPARATE_PAIRS = 6;
-// Half the visible area around the cat, for weapons that strike "on screen":
-// about what a phone held upright shows.
-const SCREEN_X = 210;
-const SCREEN_Y = 440;
+// Half the visible area around the cat: 12 cats across a phone held
+// upright (VS shows 15 heroes down a screen held sideways). The client zooms
+// so its screen fits in it; weapons that strike "on screen" use it too.
+export const SCREEN_X = 276;
+export const SCREEN_Y = 600;
+// As in VS, enemies come 75 px (here 112) outside the screen's edge, and
+// one that falls behind more than 1.6 screens across or 1.4 down comes back
+// on the side the cat is heading to.
+const SPAWN_X = SCREEN_X + 112;
+const SPAWN_Y = SCREEN_Y + 112;
+const FAR_X = SCREEN_X * 1.6;
+const FAR_Y = SCREEN_Y * 1.4;
+// A hit pushes an enemy back for 0.12 s (VS: as long as it flashes).
+const KNOCK_TICKS = 4;
+// Players' invulnerability after a hit: VS's 120 ms.
+const HURT_TICKS = 4;
+// Gems fly to the cat from 375 a second, 90 faster every second (VS: 250 px/s,
+// +1 every frame), and are taken this far beyond the magnet (VS: their 10 px).
+const GEM_SPEED = 375;
+const GEM_ACCEL = 3;
+const GEM_R = 15;
+// Attractorb: the magnet radius at each level.
+const CATNIP = [1, 1.5, 2, 2.5, 3, 4];
 
 // Difficulty knobs, tuned with `npm run balance:cats`.
 // Enemies hurt the cat only when they overlap it this deep, like the small
@@ -114,6 +133,8 @@ export interface Enemy {
   xp: number;
   kx: number;
   ky: number;
+  knock: number; // ticks it is still pushed back
+  knockPow: number; // how hard: the weapon's knockback
   // Charging enemies keep this heading.
   vx: number;
   vy: number;
@@ -144,7 +165,7 @@ export interface Hazard {
 
 const FLOCK = 5; // pigeons in a flock
 const SWARM = 8; // in one group of a swarm
-const SWARM_SPEED = 450; // 700 in VS
+const SWARM_SPEED = 267; // 700 in VS, at 0.381 a point
 const WALL = 36; // enemies in the closing ring
 const WALL_RADIUS = 430;
 const HOSE = 6; // segments in a hose
@@ -185,6 +206,7 @@ export interface Gem {
   v: number;
   pull: boolean;
   got: boolean;
+  speed: number; // while flying to the cat
 }
 
 // Things on the floor, as in Vampire Survivors: food heals, catnip pulls
@@ -489,14 +511,11 @@ export class CatRun {
   // ---------- spawning ----------
   private spawn(kind: EnemyKind, elite = false): Enemy {
     const def = ENEMIES[kind];
-    let a = this.rng.next() * Math.PI * 2;
-    // Between fences or walls, look for a side of the cat with floor.
-    for (let i = 0; i < 8 && !this.map.inside(this.player.x + dcos(a) * SPAWN_DISTANCE, this.player.y + dsin(a) * SPAWN_DISTANCE); i++) {
-      a = this.rng.next() * Math.PI * 2;
-    }
+    // Anywhere on the edge of the spawn rectangle, as in VS; between fences
+    // or walls, look for a spot with floor.
+    let [x, y] = this.edgePoint();
+    for (let i = 0; i < 8 && !this.map.inside(x, y); i++) [x, y] = this.edgePoint();
     const hp = def.hp;
-    const x = this.player.x + dcos(a) * SPAWN_DISTANCE;
-    const y = this.player.y + dsin(a) * SPAWN_DISTANCE;
     const en: Enemy = {
       id: this.nextId++,
       kind,
@@ -510,6 +529,8 @@ export class CatRun {
       xp: elite ? 30 : def.xp, // the glowing bat of VS; the bigger elites set their own
       kx: 0,
       ky: 0,
+      knock: 0,
+      knockPow: 0,
       vx: 0,
       vy: 0,
       elite,
@@ -527,6 +548,24 @@ export class CatRun {
     if (def.move === 'charge' || def.move === 'flock') this.aim(en);
     this.enemies.push(en);
     return en;
+  }
+
+  // A random point on the edge of the spawn rectangle around the cat.
+  private edgePoint(): [number, number] {
+    const p = this.player;
+    let t = this.rng.next() * 4 * (SPAWN_X + SPAWN_Y);
+    if (t < 2 * SPAWN_X) return [p.x - SPAWN_X + t, p.y - SPAWN_Y];
+    t -= 2 * SPAWN_X;
+    if (t < 2 * SPAWN_X) return [p.x - SPAWN_X + t, p.y + SPAWN_Y];
+    t -= 2 * SPAWN_X;
+    if (t < 2 * SPAWN_Y) return [p.x - SPAWN_X, p.y - SPAWN_Y + t];
+    return [p.x + SPAWN_X, p.y - SPAWN_Y + t - 2 * SPAWN_Y];
+  }
+
+  // Where the edge of the spawn rectangle is from the cat in direction (ux, uy).
+  private edge(ux: number, uy: number): [number, number] {
+    const t = Math.min(ux ? SPAWN_X / Math.abs(ux) : Infinity, uy ? SPAWN_Y / Math.abs(uy) : Infinity);
+    return [this.player.x + ux * t, this.player.y + uy * t];
   }
 
   // Puts an enemy inside the walls; in the open flat it may stand anywhere
@@ -589,8 +628,9 @@ export class CatRun {
     const ux = dcos(a);
     const uy = dsin(a);
     const off = (this.rng.next() - 0.5) * 300;
-    const cx = this.player.x - ux * SPAWN_DISTANCE - uy * off;
-    const cy = this.player.y - uy * SPAWN_DISTANCE + ux * off;
+    const [ex, ey] = this.edge(-ux, -uy);
+    const cx = ex - uy * off;
+    const cy = ey + ux * off;
     const n = ghost ? 5 : SWARM;
     for (let i = 0; i < n && this.enemies.length < MAX_ENEMIES; i++) {
       const e = this.spawn(kind);
@@ -708,16 +748,17 @@ export class CatRun {
 
   // ---------- combat ----------
   // `heal` is health the cat gets back for the hit (evolved claws and meow).
-  private hit(en: Enemy, dmg: number, kx: number, ky: number, src: WeaponId | null, heal = 0): void {
+  // `kb` is the weapon's knockback (VS: 1 for most, 0.5 for the knife).
+  private hit(en: Enemy, dmg: number, kb: number, src: WeaponId | null, heal = 0): void {
     if (en.dead || en.kind === 'cleaner') return;
     if (heal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
     if (src) this.damage[src] = (this.damage[src] ?? 0) + Math.min(dmg, Math.max(0, en.hp));
     en.hp -= dmg;
     en.hitTick = this.tick;
-    // Big enemies are heavy: knockback shrinks with size.
-    const mass = ENEMIES.mouse.r / en.r;
-    en.kx += kx * mass;
-    en.ky += ky * mass;
+    if (kb) {
+      en.knock = KNOCK_TICKS;
+      en.knockPow = kb;
+    }
     this.emit({ t: 'hit', x: en.x, y: en.y - en.r, dmg });
     if (en.hp <= 0) {
       en.dead = true;
@@ -789,7 +830,7 @@ export class CatRun {
       far.v += v;
       return;
     }
-    this.gems.push({ id: this.nextId++, x, y, v, pull: false, got: false });
+    this.gems.push({ id: this.nextId++, x, y, v, pull: false, got: false, speed: GEM_SPEED });
   }
 
   private nearest(x: number, y: number, maxD: number, skip?: Set<number>): Enemy | null {
@@ -875,7 +916,7 @@ export class CatRun {
         const cy = p.y - i * h * 0.5;
         this.emit({ t: 'slash', x: cx, y: cy, w: width, h, face });
         for (const en of this.enemies) {
-          if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, face * 50, 0, 'claws', this.evolved.claws ? 0.5 : 0);
+          if (Math.abs(en.x - cx) < width / 2 + en.r && Math.abs(en.y - cy) < h / 2 + en.r) this.hit(en, w.dmg, 1, 'claws', this.evolved.claws ? 0.5 : 0);
         }
         if (this.props.length) this.smash((x, y) => Math.abs(x - cx) < width / 2 + PROP_R && Math.abs(y - cy) < h / 2 + PROP_R);
         break;
@@ -937,7 +978,7 @@ export class CatRun {
         const R = 26 * w.area;
         this.emit({ t: 'spark', x: t.x, y: t.y, r: R });
         const times = this.evolved.spark ? 2 : 1;
-        for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 0, 'spark');
+        for (const en of this.enemies) if ((en.x - t.x) ** 2 + (en.y - t.y) ** 2 < (R + en.r) ** 2) for (let k = 0; k < times; k++) this.hit(en, w.dmg, 0, 'spark');
         if (this.props.length) this.smash((x, y) => (x - t.x) ** 2 + (y - t.y) ** 2 < (R + PROP_R) ** 2);
         break;
       }
@@ -962,7 +1003,7 @@ export class CatRun {
       if (en.dead || en.meowTick > this.tick) continue;
       if ((en.x - p.x) ** 2 + (en.y - p.y) ** 2 < (R + en.r) ** 2) {
         en.meowTick = this.tick + every;
-        this.hit(en, w.dmg, 0, 0, 'meow', this.evolved.meow ? 0.3 : 0);
+        this.hit(en, w.dmg, 0, 'meow', this.evolved.meow ? 0.3 : 0);
       }
     }
   }
@@ -992,7 +1033,7 @@ export class CatRun {
         if (en.dead || en.yarnTick > this.tick) continue;
         if ((en.x - x) ** 2 + (en.y - y) ** 2 < (en.r + r) ** 2) {
           en.yarnTick = this.tick + Math.round(1.7 * TICK_RATE); // the VS hitbox delay
-          this.hit(en, w.dmg, c * 60, s * 60, 'yarn');
+          this.hit(en, w.dmg, 1, 'yarn');
         }
       }
     }
@@ -1016,14 +1057,15 @@ export class CatRun {
         en.dead = true;
         continue;
       }
-      if (d > DESPAWN_DISTANCE) {
+      if (Math.abs(dx) > FAR_X || Math.abs(dy) > FAR_Y) {
         // A flock that flew past is gone.
         if (move === 'flock') {
           en.dead = true;
           continue;
         }
         // Left far behind: it comes back from the other side of the screen.
-        [en.x, en.y] = this.place(p.x + (dx / d) * SPAWN_DISTANCE, p.y + (dy / d) * SPAWN_DISTANCE, en.r);
+        const [x, y] = this.edge(dx / d, dy / d);
+        [en.x, en.y] = this.place(x, y, en.r);
         if (move === 'charge') this.aim(en);
         continue;
       }
@@ -1032,7 +1074,7 @@ export class CatRun {
       let speed = en.speed;
       if (move === 'charge') {
         // Passed the cat and drove on: turn around.
-        if (d > SPAWN_DISTANCE && en.vx * dx + en.vy * dy < 0) this.aim(en);
+        if ((Math.abs(dx) > SPAWN_X || Math.abs(dy) > SPAWN_Y) && en.vx * dx + en.vy * dy < 0) this.aim(en);
         ux = en.vx;
         uy = en.vy;
       } else if (move === 'flock') {
@@ -1065,6 +1107,12 @@ export class CatRun {
           speed = ld < en.r * 1.6 ? 0 : Math.min(speed * 1.6, (ld - en.r * 1.6) * TICK_RATE);
         }
       }
+      // Hit: it goes back the way it came, at its own speed times its and
+      // the weapon's knockback.
+      if (en.knock > 0) {
+        en.knock--;
+        speed *= -def.kb * en.knockPow;
+      }
       const ox = en.x;
       const oy = en.y;
       en.x += (ux * speed + en.kx) * DT;
@@ -1080,7 +1128,7 @@ export class CatRun {
       // Pressed flat against furniture: walk along it to get round instead of
       // standing there.
       const step = speed * DT;
-      if (step > 0 && !fly && (en.x - ox) ** 2 + (en.y - oy) ** 2 < (step * 0.3) ** 2) {
+      if (step > 0 && !en.knock && !fly && (en.x - ox) ** 2 + (en.y - oy) ** 2 < (step * 0.3) ** 2) {
         const way = this.map.detour(en.x, en.y, en.r, p.x, p.y);
         if (way) [en.x, en.y] = this.map.pushOut(en.x + way[0] * step, en.y + way[1] * step, en.r);
       }
@@ -1098,7 +1146,7 @@ export class CatRun {
     const p = this.player;
     const dmg = Math.max(1, raw - this.stats.armor);
     p.hp -= dmg;
-    p.inv = Math.round(0.24 * TICK_RATE); // as in VS
+    p.inv = HURT_TICKS;
     this.emit({ t: 'hurt', dmg, kind });
     if (p.hp > 0) return false;
     if (this.revives > 0) {
@@ -1252,8 +1300,7 @@ export class CatRun {
         if (en.dead || s.life <= 0) continue;
         if ((en.x - s.x) ** 2 + (en.y - s.y) ** 2 >= (en.r + s.r) ** 2 || s.hits.includes(en.id)) continue;
         s.hits.push(en.id);
-        const v = len(s.vx, s.vy) || 1;
-        this.hit(en, s.dmg, (s.vx / v) * 40, (s.vy / v) * 40, s.kind);
+        this.hit(en, s.dmg, s.kind === 'fish' ? 0.5 : 1, s.kind);
         if (s.pierce-- <= 0) s.life = 0;
       }
     }
@@ -1275,7 +1322,7 @@ export class CatRun {
       }
       if (z.life % 15 !== 0) continue;
       if (this.props.length) this.smash((x, y) => (x - z.x) ** 2 + (y - z.y) ** 2 < (z.r + PROP_R) ** 2);
-      for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 0, 'glass');
+      for (const en of this.enemies) if ((en.x - z.x) ** 2 + (en.y - z.y) ** 2 < (z.r + en.r) ** 2) this.hit(en, z.dmg, 0, 'glass');
     }
   }
 
@@ -1286,9 +1333,10 @@ export class CatRun {
       const dx = p.x - g.x;
       const dy = p.y - g.y;
       const d = len(dx, dy) || 1;
-      if (d < this.stats.magnet || g.pull) {
+      if (d < this.stats.magnet + GEM_R || g.pull) {
         g.pull = true;
-        const step = Math.min(d, Math.max(400, d * 2) * DT);
+        const step = Math.min(d, g.speed * DT);
+        g.speed += GEM_ACCEL;
         g.x += (dx / d) * step;
         g.y += (dy / d) * step;
       }
@@ -1326,7 +1374,7 @@ export class CatRun {
           break;
         case 'alarm':
           for (const en of this.enemies) {
-            if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, 0, null);
+            if (!en.elite && Math.abs(en.x - p.x) < SCREEN_X && Math.abs(en.y - p.y) < SCREEN_Y) this.hit(en, en.hp, 0, null);
           }
           break;
       }
@@ -1439,7 +1487,7 @@ export class CatRun {
     s.move *= 1 + 0.05 * (pw.move ?? 0);
     s.area += 0.05 * (pw.area ?? 0);
     s.cooldown -= 0.025 * (pw.cooldown ?? 0);
-    s.magnet *= 1 + 0.25 * (pw.magnet ?? 0);
+    s.magnet *= (1 + 0.25 * (pw.magnet ?? 0)) * CATNIP[this.lvl('catnip')];
     s.luck += 0.1 * (pw.luck ?? 0);
     s.growth += 0.03 * (pw.growth ?? 0);
     for (const id of this.passives()) {
