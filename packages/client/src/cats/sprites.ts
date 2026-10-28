@@ -2,6 +2,11 @@
 // for 260 enemies every frame is too slow on phones. Each sprite is drawn in
 // a 100×100 box centred on the creature; the game scales it to the hitbox.
 //
+// The pixel art comes from one atlas made by tools/pixel-art/build.py; each
+// creature fills its square cell the way the vector picture fills its box.
+// Until the atlas has loaded, and for any name it lacks, the vector pictures
+// below are drawn instead.
+//
 // Everything is drawn here, in one flat style: outlines are a darker shade
 // of the fill, eyes are white with a pupil, heads are big so a creature
 // reads at 30 px. Creatures face right; the game mirrors them. The heroes
@@ -9,6 +14,53 @@
 // cartoon.
 
 import type { cats } from '@otryad/core';
+import atlasUrl from './art/atlas.png';
+import RECTS from './art/atlas.json';
+
+type Rect = [number, number, number, number];
+const ART = RECTS as unknown as Record<string, Rect>;
+let atlas: HTMLImageElement | null = null;
+
+// Loads the atlas once; resolves even if it fails, so the game still starts.
+export function loadArt(): Promise<void> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      atlas = img;
+      cache.clear();
+      resolve();
+    };
+    img.onerror = () => resolve();
+    img.src = atlasUrl;
+  });
+}
+
+// A picture from the atlas: the image and its cell, or null.
+export function art(name: string): [HTMLImageElement, Rect] | null {
+  const r = ART[name];
+  return atlas && r ? [atlas, r] : null;
+}
+
+// An atlas picture scaled up by a whole number with hard pixel edges, for
+// patterns and big things the game stretches itself.
+const big = new Map<string, HTMLCanvasElement>();
+export function artCanvas(name: string, k: number): HTMLCanvasElement | null {
+  const a = art(name);
+  if (!a) return null;
+  const key = `${name}:${k}`;
+  let s = big.get(key);
+  if (!s) {
+    const [img, [x, y, w, h]] = a;
+    s = document.createElement('canvas');
+    s.width = w * k;
+    s.height = h * k;
+    const c = s.getContext('2d')!;
+    c.imageSmoothingEnabled = false;
+    c.drawImage(img, x, y, w, h, 0, 0, w * k, h * k);
+    big.set(key, s);
+  }
+  return s;
+}
 
 export type SpriteId =
   // heroes
@@ -789,10 +841,19 @@ export function sprite(id: SpriteId, px: number, flip = false, tint?: string): H
       c.translate(size, 0);
       c.scale(-1, 1);
     }
-    c.scale(size / 100, size / 100);
-    c.lineJoin = 'round';
-    c.lineCap = 'round';
-    PAINT[id](c);
+    const a = art(id);
+    if (a) {
+      // Hard pixel edges; the cell fills the box.
+      const [img, [x, y, w, h]] = a;
+      const k = size / Math.max(w, h);
+      c.imageSmoothingEnabled = false;
+      c.drawImage(img, x, y, w, h, (size - w * k) / 2, (size - h * k) / 2, w * k, h * k);
+    } else {
+      c.scale(size / 100, size / 100);
+      c.lineJoin = 'round';
+      c.lineCap = 'round';
+      PAINT[id](c);
+    }
     if (tint) {
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.globalCompositeOperation = 'source-atop';
