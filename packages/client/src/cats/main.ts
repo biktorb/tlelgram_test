@@ -98,7 +98,7 @@ const ICONS: Record<CardId, SpriteId | string> = {
   food: '🥣',
   blackcat: '🧿',
   snack: '🍺',
-  fishes: '🪙',
+  fishes: '💰',
 };
 
 function icon(id: CardId, px = 40): HTMLElement {
@@ -264,7 +264,7 @@ function menu(): void {
     more.append(
       button('📅 Вызов дня', 'tile', () => dailyScreen()),
       button('🏆 Лига', 'tile', () => leagueScreen()),
-      button('🪙 Злато', 'tile', () => profileScreen()),
+      button('💰 Злато', 'tile', () => profileScreen()),
       button('⚔️ Вызовы', 'tile', () => answersScreen()),
     );
     box.append(more);
@@ -508,7 +508,7 @@ function chestScreen(e: { evolved: cats.WeaponId[]; items: ItemId[] }): void {
     r.append(icon(k, 30), h('b', '', cardName(k)), h('span', 'lv', `ур. ${g.run.lvl(k)}`));
     rows.push(r);
   }
-  if (!rows.length) rows.push(h('div', '', '+10 🪙'));
+  if (!rows.length) rows.push(h('div', '', '+10 💰'));
   setTimeout(() => {
     chest.classList.add('open');
     chest.textContent = '✨';
@@ -690,7 +690,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   );
   if (vs) box.append(h('p', 'vs', vs));
   if (run.won) box.append(h('p', 'tale', STORY[run.room].won));
-  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги${server.result.fish ? ` · +${server.result.fish} 🪙` : ''}`));
+  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги${server.result.fish ? ` · +${server.result.fish} 💰` : ''}`));
   if (server?.daily?.rank) box.append(h('p', 'best', `Вызов дня: ${server.daily.rank} место`));
   else if (better) box.append(h('p', 'best', 'Новый рекорд!'));
   if (error) box.append(h('p', 'error', error));
@@ -723,7 +723,7 @@ function heroScreen(): void {
   screen('Богатыри', async (box) => {
     const render = (list: HeroInfo[], fish: number | null) => {
       box.replaceChildren(h('p', '', 'У каждого героя своё первое оружие и бонус, который растёт с уровнем. В дуэли каждый играет своим героем.'));
-      if (fish !== null) box.append(h('p', 'best', `🪙 ${fish}`));
+      if (fish !== null) box.append(h('p', 'best', `💰 ${fish}`));
       const chosen = chosenHero();
       for (const info of list) {
         const def: cats.HeroDef = cats.HEROES[info.id];
@@ -748,7 +748,7 @@ function heroScreen(): void {
         } else {
           const u: cats.HeroDef['unlock'] = def.unlock;
           if (u && 'fish' in u) {
-            const b = button(`${u.fish} 🪙`, 'btn small', async () => {
+            const b = button(`${u.fish} 💰`, 'btn small', async () => {
               try {
                 const p = await api!.shop('buy', `hero:${info.id}`);
                 save({ ...load(), hero: info.id });
@@ -789,7 +789,7 @@ const POWER_ICONS: Record<cats.PowerId, string> = {
   magnet: '🧲',
   luck: '🍀',
   growth: '👑',
-  greed: '🪙',
+  greed: '💰',
   reroll: '🎲',
   revive: '💨',
 };
@@ -798,7 +798,7 @@ function powerScreen(): void {
   let picked: cats.PowerId = 'might';
   screen('Усиления', async (box) => {
     const render = (p: Profile) => {
-      const reset = button(`Сброс усилений${p.powerSpent ? ` (+${p.powerSpent} 🪙)` : ''}`, 'btn', async () => {
+      const reset = button(`Сброс усилений${p.powerSpent ? ` (+${p.powerSpent} 💰)` : ''}`, 'btn', async () => {
         try {
           render(await api!.refund());
         } catch (e) {
@@ -825,7 +825,7 @@ function powerScreen(): void {
             }
           });
           b.disabled = p.fish < price;
-          buy.append(h('span', '', `${price} 🪙`), b);
+          buy.append(h('span', '', `${price} 💰`), b);
         }
         const ic = h('span', 'ico emoji', POWER_ICONS[id]);
         detail.replaceChildren(ic, text, buy);
@@ -844,7 +844,7 @@ function powerScreen(): void {
       show(picked);
       const panel = h('div', 'panel frame');
       panel.style.padding = '10px';
-      panel.append(h('div', 'counter', `🪙 ${p.fish}`), reset, grid);
+      panel.append(h('div', 'counter', `💰 ${p.fish}`), reset, grid);
       box.replaceChildren(panel, detail);
     };
     render(await api!.profile());
@@ -863,7 +863,7 @@ function unlockScreen(): void {
       const u: cats.HeroDef['unlock'] = def.unlock;
       if (!u) continue;
       const text = cats.unlockText(id);
-      const cond = 'fish' in u ? `Купите за ${u.fish} 🪙` : `${text[0].toUpperCase()}${text.slice(1)}${info ? `: ${info.have}/${info.need}` : ''}`;
+      const cond = 'fish' in u ? `Купите за ${u.fish} 💰` : `${text[0].toUpperCase()}${text.slice(1)}${info ? `: ${info.have}/${info.need}` : ''}`;
       rows.push({ done: !!info?.owned, what: cond, icon: () => heroPicture(28, id), detail: `Открывает героя: ${def.name}` });
     }
     for (const id of cats.ROOM_IDS) {
@@ -961,10 +961,10 @@ function profileScreen(): void {
   api?.track('open_store');
   screen('Злато и ауры', async (box) => {
     const render = (p: Profile) => {
-      box.replaceChildren(h('p', 'best', `🪙 ${p.fish}`));
+      box.replaceChildren(h('p', 'best', `💰 ${p.fish}`));
       const tasks = h('ul', 'tasks');
       for (const t of p.tasks) {
-        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✅' : '▫️'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 🪙`));
+        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✅' : '▫️'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 💰`));
       }
       box.append(h('h2', '', 'Задания дня'), tasks);
       const s = p.season;
@@ -974,7 +974,7 @@ function profileScreen(): void {
       for (const f of FRAMES) {
         const owned = p.owned.includes(f.id);
         const worn = p.frame === f.id;
-        const label = worn ? `${f.name}: снять` : owned ? `${f.name}: надеть` : f.exclusive ? `${f.name}: только в сезоне` : `${f.name}: ${f.price} 🪙`;
+        const label = worn ? `${f.name}: снять` : owned ? `${f.name}: надеть` : f.exclusive ? `${f.name}: только в сезоне` : `${f.name}: ${f.price} 💰`;
         const b = button(label, `item aura-${f.id}${worn ? ' on' : ''}`, async () => {
           try {
             render(await api!.shop(owned ? 'equip' : 'buy', worn ? null : f.id));
