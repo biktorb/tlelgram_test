@@ -81,9 +81,9 @@ export async function buildApp(
     const duel = req.body?.duel ?? null;
     if (duel !== null && typeof duel !== 'string') throw new GameError(400, 'Неверный код вызова');
     const hero = req.body?.hero ?? 'ryzhik';
-    if (!cats.isHero(hero)) throw new GameError(400, 'Неизвестный кот');
+    if (!cats.isHero(hero)) throw new GameError(400, 'Неизвестный герой');
     const room = req.body?.room ?? 'flat';
-    if (!cats.isRoom(room)) throw new GameError(400, 'Неизвестная комната');
+    if (!cats.isRoom(room)) throw new GameError(400, 'Неизвестная локация');
     await store.upsertUser(u.id, u.first_name, u.username);
     return game.start(u.id, u.first_name || 'Игрок', mode, duel, req.auth!.chatInstance ?? null, hero, room);
   });

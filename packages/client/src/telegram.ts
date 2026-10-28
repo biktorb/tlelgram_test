@@ -98,7 +98,7 @@ export function shareStory(mediaUrl: string, text: string): void {
 }
 
 export function playerName(): string {
-  return tg?.initDataUnsafe.user?.first_name || 'Ваш кот';
+  return tg?.initDataUnsafe.user?.first_name || 'Богатырь';
 }
 
 export const haptic = {

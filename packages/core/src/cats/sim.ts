@@ -37,8 +37,8 @@ import { dcos, dsin, len } from './math.ts';
 // 4: floor things from breakables, evolutions from 10:00, boss per level,
 // 5: numbers from the game's own data (waves, elites, XP, the wall, cards),
 // 6: numbers from the game's code (speeds, view, spawning, knockback, magnet),
-// 7: evolutions from 7:00.
-export const SIM_VERSION = 7;
+// 7: evolutions from 7:00, 8: the view 13.5 heroes across instead of 12.
+export const SIM_VERSION = 8;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
@@ -62,11 +62,12 @@ const DESPAWN_DISTANCE = 1400; // breakables further than this go
 const KNOCKBACK_DECAY = 0.8777435898906345; // 0.02 per second, per tick
 const CELL = 40;
 const SEPARATE_PAIRS = 6;
-// Half the visible area around the cat: 12 cats across a phone held
-// upright (VS shows 15 heroes down a screen held sideways). The client zooms
-// so its screen fits in it; weapons that strike "on screen" use it too.
-export const SCREEN_X = 276;
-export const SCREEN_Y = 600;
+// Half the visible area around the hero: 13.5 heroes across a phone held
+// upright (VS shows 15 heroes down a screen held sideways; the owner wanted
+// 1.5 more than the 12 we had). The client zooms so its screen fits in it;
+// weapons that strike "on screen" use it too.
+export const SCREEN_X = 310;
+export const SCREEN_Y = 675;
 // As in VS, enemies come 75 px (here 112) outside the screen's edge, and
 // one that falls behind more than 1.6 screens across or 1.4 down comes back
 // on the side the cat is heading to.

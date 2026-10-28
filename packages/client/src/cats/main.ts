@@ -2,7 +2,7 @@ import { cats, FRAMES } from '@otryad/core';
 import { haptic, initTelegram, setBack, shareLink, startParam } from '../telegram.ts';
 import { ApiError, connect, type Finished, type HeroInfo, type Profile, type Score, type Started } from './api.ts';
 import { Game, type GameOptions, type RunRecord } from './game.ts';
-import { catSprite, loadSprites, sprite, type SpriteId } from './sprites.ts';
+import { heroSprite, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
 const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
@@ -25,9 +25,10 @@ let serverRun: Started['run'] | null = null;
 interface Saved {
   best?: { ticks: number; kills: number; won: boolean };
   last?: { seed: number; record: RunRecord; ticks: number; kills: number; hero?: HeroId; room?: RoomId; powers?: cats.Powers };
-  hero?: HeroId; // the cat picked for the next run
-  room?: RoomId; // and the room
+  hero?: HeroId; // the hero picked for the next run
+  room?: RoomId; // and the location
   found?: string[]; // items and evolutions met in runs, for the collection
+  story?: RoomId[]; // locations whose tale has been told
 }
 function load(): Saved {
   try {
@@ -78,31 +79,31 @@ function button(text: string, cls: string, onClick: () => void): HTMLButtonEleme
 }
 
 const ICONS: Record<CardId, SpriteId | string> = {
-  claws: '🐾',
-  laser: '🔴',
-  fish: 'fish',
-  yarn: 'yarn',
-  meow: '📣',
-  glass: '🥛',
-  pot: '🪴',
+  claws: '🗡️',
+  laser: 'feather',
+  fish: 'arrow',
+  yarn: 'charm',
+  meow: '🪕',
+  glass: '💧',
+  pot: 'axe',
   spark: '⚡',
-  belly: '🍗',
-  box: '📦',
-  paws: '🧤',
-  patience: '⏳',
-  purr: '💤',
-  catnip: '🌿',
-  bigpaws: '🦶',
-  pack: '🐈',
-  food: '🥫',
-  blackcat: '🐈‍⬛',
-  snack: '🥪',
-  fishes: '🐟',
+  belly: '🍞',
+  box: '📖',
+  paws: '🛡️',
+  patience: '🧵',
+  purr: '🍎',
+  catnip: '🧲',
+  bigpaws: '💪',
+  pack: '🪞',
+  food: '🥣',
+  blackcat: '🧿',
+  snack: '🍺',
+  fishes: '🪙',
 };
 
 function icon(id: CardId, px = 40): HTMLElement {
   const v = ICONS[id];
-  if (v === 'fish' || v === 'yarn') {
+  if (v === 'feather' || v === 'arrow' || v === 'charm' || v === 'axe') {
     const img = sprite(v, px * 2);
     const c = h('canvas', 'ico');
     c.width = c.height = px * 2;
@@ -113,10 +114,10 @@ function icon(id: CardId, px = 40): HTMLElement {
   return h('span', 'ico emoji', v);
 }
 
-function catPicture(px: number, hero: HeroId = chosenHero()): HTMLCanvasElement {
+function heroPicture(px: number, hero: HeroId = chosenHero()): HTMLCanvasElement {
   const c = h('canvas', 'hero');
   c.width = c.height = px * 2;
-  c.getContext('2d')!.drawImage(catSprite(hero, px * 2), 0, 0);
+  c.getContext('2d')!.drawImage(heroSprite(hero, px * 2), 0, 0);
   c.style.width = c.style.height = `${px}px`;
   return c;
 }
@@ -230,16 +231,16 @@ function menu(): void {
   setBack(null);
   const s = load();
   const box = overlay(
-    catPicture(110),
-    h('h1', '', 'Коты против пылесосов'),
-    h('p', '', `Ведите кота пальцем, он атакует сам. Собирайте кристаллы, выбирайте улучшения и продержитесь ${RUN_SECONDS / 60} минут.`),
+    heroPicture(110),
+    h('h1', '', 'Богатыри против нечисти'),
+    h('p', '', `Кощей наслал на Русь нечисть. Ведите богатыря пальцем, он бьётся сам. Собирайте самоцветы, выбирайте улучшения и продержитесь ${RUN_SECONDS / 60} минут.`),
   );
   if (s.best) box.append(h('p', 'best', `Рекорд: ${scoreText(s.best)}`));
   const hero = cats.HEROES[chosenHero()];
   const pick = h('div', 'picks');
   pick.append(
-    button(`🐱 ${hero.name}`, 'tile', () => heroScreen()),
-    button(`🏠 ${cats.ROOMS[chosenRoom()].name}`, 'tile', () => roomScreen()),
+    button(`🛡️ ${hero.name}`, 'tile', () => heroScreen()),
+    button(`🗺️ ${cats.ROOMS[chosenRoom()].name}`, 'tile', () => roomScreen()),
   );
   box.append(pick);
   const buttons = h('div', 'buttons');
@@ -263,7 +264,7 @@ function menu(): void {
     more.append(
       button('📅 Вызов дня', 'tile', () => dailyScreen()),
       button('🏆 Лига', 'tile', () => leagueScreen()),
-      button('🐟 Рыба', 'tile', () => profileScreen()),
+      button('🪙 Злато', 'tile', () => profileScreen()),
       button('⚔️ Вызовы', 'tile', () => answersScreen()),
     );
     box.append(more);
@@ -279,21 +280,77 @@ function menu(): void {
       if (top && !game) more.append(button('💬 Чат', 'tile', () => chatScreen()));
     }, () => {});
   }
-
-  const credit = h('a', 'credit', 'Кот, пёс и мышь: Olga Bikmullina, CC-BY 3.0');
-  credit.href = 'https://opengameart.org/content/animals-pack';
-  credit.target = '_blank';
-  credit.rel = 'noopener';
-  box.append(credit);
   ui.replaceChildren(box);
 }
 
 const progressTicks = (rec: RunRecord | null) => (rec ? cats.decodeMoves(rec.moves).length : 0);
 
+// ---------- the tale ----------
+// Each location opens with a few frames of the tale, once; they can be
+// read again from the location list. A won run ends with its epilogue.
+const STORY: Record<RoomId, { title: string; frames: [string, string][]; won: string }> = {
+  flat: {
+    title: 'Дремучий лес',
+    frames: [
+      ['🏰', 'Кощей Бессмертный наслал на Русь нечисть. Опустели деревни, по дорогам стало страшно ходить.'],
+      ['🛡️', 'Собрались богатыри на заставе и решили идти на Кощея, в его царство. Путь лежит через Дремучий лес.'],
+      ['🧹', 'Лесную тропу стережёт Баба-Яга со своими слугами. Продержись двадцать минут, и лес тебя пропустит.'],
+    ],
+    won: 'Баба-Яга, побитая, указала дорогу: «Ступай на Муромскую дорогу, там Соловей-Разбойник путь стережёт». А из-за деревьев уже глядел сам Кощей.',
+  },
+  yard: {
+    title: 'Муромская дорога',
+    frames: [
+      ['🛤️', 'Муромская дорога заросла травой: тридцать лет по ней никто не ездил.'],
+      ['🌳', 'На девяти дубах свил гнездо Соловей-Разбойник. От его свиста гнутся деревья и падают кони, а в чаще прячется его шайка.'],
+      ['⚔️', 'Пройди дорогу и заставь Соловья замолчать.'],
+    ],
+    won: 'Соловей связан и больше не свистит. Дорога свободна до огненной реки Смородины, а за Калиновым мостом начинается Кощеево царство.',
+  },
+  warehouse: {
+    title: 'Кощеево царство',
+    frames: [
+      ['🔥', 'Через огненную реку Смородину перекинут Калинов мост. За мостом стоит чёрный замок Кощея.'],
+      ['🐉', 'Мост стережёт Змей Горыныч о трёх головах, а в залах ходит костяное войско.'],
+      ['🥚', 'Кощея не убить, пока его смерть спрятана: игла в яйце, яйцо в утке, утка в зайце. Но если выстоять, он отступит.'],
+    ],
+    won: 'Змей Горыныч повержен, замок Кощея дрогнул. Сам Кощей ушёл в тень, и смерть его ещё не найдена. Сказ на этом не кончается.',
+  },
+};
+
+// Shows the tale of a location frame by frame, then goes on.
+function tell(room: RoomId, then: () => void): void {
+  const tale = STORY[room];
+  const s = load();
+  if (!s.story?.includes(room)) save({ ...s, story: [...(s.story ?? []), room] });
+  let i = 0;
+  const pic = h('div', 'big');
+  const text = h('p', 'tale');
+  const next = button('', 'btn', () => {
+    i++;
+    if (i < tale.frames.length) show();
+    else then();
+  });
+  const box = overlay(h('h1', '', tale.title), pic, text, next, button('Пропустить', 'btn secondary', () => then()));
+  const show = () => {
+    pic.textContent = tale.frames[i][0];
+    text.textContent = tale.frames[i][1];
+    next.textContent = i < tale.frames.length - 1 ? 'Дальше' : 'В путь!';
+  };
+  show();
+  ui.replaceChildren(box);
+}
+
+// The tale before the first run in a location.
+function withTale(room: RoomId, go: () => void): void {
+  if (load().story?.includes(room)) go();
+  else tell(room, go);
+}
+
 // ---------- playing ----------
 async function startServer(mode: 'free' | 'daily' | 'duel', duel?: string): Promise<void> {
   if (!api) {
-    play((Math.random() * 2 ** 32) >>> 0, { hero: chosenHero(), room: chosenRoom() });
+    withTale(chosenRoom(), () => play((Math.random() * 2 ** 32) >>> 0, { hero: chosenHero(), room: chosenRoom() }));
     return;
   }
   try {
@@ -304,6 +361,10 @@ async function startServer(mode: 'free' | 'daily' | 'duel', duel?: string): Prom
 }
 
 function playServer(s: Started): void {
+  if (!s.run.progress && !load().story?.includes(s.run.room)) {
+    tell(s.run.room, () => playServer(s));
+    return;
+  }
   serverRun = s.run;
   play(s.run.seed, {
     ghost: s.ghost?.record,
@@ -447,7 +508,7 @@ function chestScreen(e: { evolved: cats.WeaponId[]; items: ItemId[] }): void {
     r.append(icon(k, 30), h('b', '', cardName(k)), h('span', 'lv', `ур. ${g.run.lvl(k)}`));
     rows.push(r);
   }
-  if (!rows.length) rows.push(h('div', '', '+10 🐟'));
+  if (!rows.length) rows.push(h('div', '', '+10 🪙'));
   setTimeout(() => {
     chest.classList.add('open');
     chest.textContent = '✨';
@@ -622,13 +683,14 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
     ups.append(u);
   }
   const box = overlay(
-    run.won ? catPicture(100, run.hero) : h('div', 'big', '😿'),
-    h('h1', '', run.won ? 'Кот выстоял!' : 'Кота засосало'),
+    run.won ? heroPicture(100, run.hero) : h('div', 'big', '💀'),
+    h('h1', '', run.won ? `${cats.HEROES[run.hero].name} выстоял!` : 'Нечисть одолела'),
     h('p', 'result', `${mmss(run.tick)} · ${run.kills} врагов · уровень ${run.level}`),
-    ...(run.tick > RUN_SECONDS * TICK_RATE ? [h('p', 'best', `От Уборщицы ${Math.floor((run.tick - RUN_SECONDS * TICK_RATE) / TICK_RATE)} с`)] : []),
+    ...(run.tick > RUN_SECONDS * TICK_RATE ? [h('p', 'best', `От Кощея ${Math.floor((run.tick - RUN_SECONDS * TICK_RATE) / TICK_RATE)} с`)] : []),
   );
   if (vs) box.append(h('p', 'vs', vs));
-  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги${server.result.fish ? ` · +${server.result.fish} 🐟` : ''}`));
+  if (run.won) box.append(h('p', 'tale', STORY[run.room].won));
+  if (server) box.append(h('p', 'best', `+${server.result.points} очков лиги${server.result.fish ? ` · +${server.result.fish} 🪙` : ''}`));
   if (server?.daily?.rank) box.append(h('p', 'best', `Вызов дня: ${server.daily.rank} место`));
   else if (better) box.append(h('p', 'best', 'Новый рекорд!'));
   if (error) box.append(h('p', 'error', error));
@@ -639,7 +701,7 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
       button('Вызвать друга', 'btn ghost', async () => {
         try {
           const { link } = await api.share(playedRun.id);
-          if (link) shareLink(link, `Я продержался ${scoreText(mine)} в «Котах против пылесосов». Переживёшь меня?`);
+          if (link) shareLink(link, `Я продержался ${scoreText(mine)} в «Богатырях против нечисти». Переживёшь меня?`);
           else toast('Ссылка для друзей пока не настроена');
         } catch (e) {
           toast(errorText(e));
@@ -655,13 +717,13 @@ async function finish(seed: number, run: CatRun, record: RunRecord, vsGhost: boo
   ui.append(box);
 }
 
-// ---------- cats ----------
-// Every cat with its weapon, stats and bonus; the locked ones show how to open them.
+// ---------- heroes ----------
+// Every hero with its weapon, stats and bonus; the locked ones show how to open them.
 function heroScreen(): void {
-  screen('Коты', async (box) => {
+  screen('Богатыри', async (box) => {
     const render = (list: HeroInfo[], fish: number | null) => {
-      box.replaceChildren(h('p', '', 'У каждого кота своё первое оружие и бонус, который растёт с уровнем. В дуэли каждый играет своим котом.'));
-      if (fish !== null) box.append(h('p', 'best', `🐟 ${fish}`));
+      box.replaceChildren(h('p', '', 'У каждого героя своё первое оружие и бонус, который растёт с уровнем. В дуэли каждый играет своим героем.'));
+      if (fish !== null) box.append(h('p', 'best', `🪙 ${fish}`));
       const chosen = chosenHero();
       for (const info of list) {
         const def: cats.HeroDef = cats.HEROES[info.id];
@@ -674,7 +736,7 @@ function heroScreen(): void {
           h('span', '', `${cats.WEAPONS[def.weapon].name} · ❤ ${hp} · скорость ${speed}%`),
           h('span', '', def.bonus),
         );
-        card.append(catPicture(56, info.id), text);
+        card.append(heroPicture(56, info.id), text);
         if (info.id === chosen) card.append(h('span', 'lv', 'выбран'));
         else if (info.owned) {
           card.append(
@@ -686,7 +748,7 @@ function heroScreen(): void {
         } else {
           const u: cats.HeroDef['unlock'] = def.unlock;
           if (u && 'fish' in u) {
-            const b = button(`${u.fish} 🐟`, 'btn small', async () => {
+            const b = button(`${u.fish} 🪙`, 'btn small', async () => {
               try {
                 const p = await api!.shop('buy', `hero:${info.id}`);
                 save({ ...load(), hero: info.id });
@@ -703,7 +765,7 @@ function heroScreen(): void {
       }
     };
     if (!api) {
-      // Without the server every cat can be tried on this device.
+      // Without the server every hero can be tried on this device.
       render(cats.HERO_IDS.map((id) => ({ id, owned: true, have: 0, need: 0 })), null);
       return;
     }
@@ -713,30 +775,30 @@ function heroScreen(): void {
 }
 
 // ---------- Power Ups ----------
-// Permanent bonuses for fish, as in VS: a grid of cells with their rank
+// Permanent bonuses for gold (fish in the code), as in VS: a grid of cells with their rank
 // squares, a panel about the one picked with its price, and a reset that
-// gives all the fish back. Every level bought makes the next ones dearer.
+// gives all the gold back. Every level bought makes the next ones dearer.
 const POWER_ICONS: Record<cats.PowerId, string> = {
-  might: '🥫',
+  might: '🥣',
   armor: '🛡️',
-  maxHp: '🍗',
-  recovery: '💤',
+  maxHp: '🍞',
+  recovery: '🍎',
   move: '👟',
-  area: '🦶',
-  cooldown: '📦',
-  magnet: '🌿',
+  area: '💪',
+  cooldown: '📖',
+  magnet: '🧲',
   luck: '🍀',
   growth: '👑',
-  greed: '🐟',
+  greed: '🪙',
   reroll: '🎲',
-  revive: '😺',
+  revive: '💨',
 };
 
 function powerScreen(): void {
   let picked: cats.PowerId = 'might';
   screen('Усиления', async (box) => {
     const render = (p: Profile) => {
-      const reset = button(`Сброс усилений${p.powerSpent ? ` (+${p.powerSpent} 🐟)` : ''}`, 'btn', async () => {
+      const reset = button(`Сброс усилений${p.powerSpent ? ` (+${p.powerSpent} 🪙)` : ''}`, 'btn', async () => {
         try {
           render(await api!.refund());
         } catch (e) {
@@ -763,7 +825,7 @@ function powerScreen(): void {
             }
           });
           b.disabled = p.fish < price;
-          buy.append(h('span', '', `${price} 🐟`), b);
+          buy.append(h('span', '', `${price} 🪙`), b);
         }
         const ic = h('span', 'ico emoji', POWER_ICONS[id]);
         detail.replaceChildren(ic, text, buy);
@@ -782,7 +844,7 @@ function powerScreen(): void {
       show(picked);
       const panel = h('div', 'panel frame');
       panel.style.padding = '10px';
-      panel.append(h('div', 'counter', `🐟 ${p.fish}`), reset, grid);
+      panel.append(h('div', 'counter', `🪙 ${p.fish}`), reset, grid);
       box.replaceChildren(panel, detail);
     };
     render(await api!.profile());
@@ -801,14 +863,14 @@ function unlockScreen(): void {
       const u: cats.HeroDef['unlock'] = def.unlock;
       if (!u) continue;
       const text = cats.unlockText(id);
-      const cond = 'fish' in u ? `Купите за ${u.fish} 🐟` : `${text[0].toUpperCase()}${text.slice(1)}${info ? `: ${info.have}/${info.need}` : ''}`;
-      rows.push({ done: !!info?.owned, what: cond, icon: () => catPicture(28, id), detail: `Открывает кота: ${def.name}` });
+      const cond = 'fish' in u ? `Купите за ${u.fish} 🪙` : `${text[0].toUpperCase()}${text.slice(1)}${info ? `: ${info.have}/${info.need}` : ''}`;
+      rows.push({ done: !!info?.owned, what: cond, icon: () => heroPicture(28, id), detail: `Открывает героя: ${def.name}` });
     }
     for (const id of cats.ROOM_IDS) {
       const def = cats.ROOMS[id];
       if (!def.after) continue;
       const done = !!p?.rooms.find((r) => r.id === id)?.owned;
-      rows.push({ done, what: `Продержитесь 20 минут в комнате «${cats.ROOMS[def.after].name}»`, icon: () => h('span', 'ico emoji', '🚪'), detail: `Открывает комнату: ${def.name}` });
+      rows.push({ done, what: `Продержитесь 20 минут: «${cats.ROOMS[def.after].name}»`, icon: () => h('span', 'ico emoji', '🗺️'), detail: `Открывает локацию: ${def.name}` });
     }
     const detail = h('div', 'detail frame');
     const list = h('ul', 'unlocks');
@@ -830,11 +892,11 @@ function unlockScreen(): void {
   });
 }
 
-// ---------- rooms ----------
+// ---------- locations ----------
 function roomScreen(): void {
-  screen('Комнаты', async (box) => {
+  screen('Путь к Кощею', async (box) => {
     const render = (list: { id: RoomId; owned: boolean }[]) => {
-      box.replaceChildren(h('p', '', 'Каждая следующая комната открывается, когда вы продержались 20 минут в предыдущей.'));
+      box.replaceChildren(h('p', '', 'Каждая следующая локация открывается, когда вы продержались 20 минут в предыдущей.'));
       const chosen = chosenRoom();
       for (const info of list) {
         const def = cats.ROOMS[info.id];
@@ -846,6 +908,9 @@ function roomScreen(): void {
           h('span', '', `Враги: ${enemies.map((k) => cats.ENEMIES[k].name).join(', ')}`),
           h('span', '', `Босс: ${cats.ENEMIES[def.boss].name}`),
         );
+        const tale = h('a', 'tale-link', 'Сказ');
+        tale.onclick = () => tell(info.id, () => roomScreen());
+        text.append(tale);
         card.append(text);
         if (info.id === chosen) card.append(h('span', 'lv', 'выбрана'));
         else if (info.owned) {
@@ -894,22 +959,22 @@ function leagueScreen(): void {
 
 function profileScreen(): void {
   api?.track('open_store');
-  screen('Рыба и ауры', async (box) => {
+  screen('Злато и ауры', async (box) => {
     const render = (p: Profile) => {
-      box.replaceChildren(h('p', 'best', `🐟 ${p.fish}`));
+      box.replaceChildren(h('p', 'best', `🪙 ${p.fish}`));
       const tasks = h('ul', 'tasks');
       for (const t of p.tasks) {
-        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✅' : '▫️'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 🐟`));
+        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✅' : '▫️'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 🪙`));
       }
       box.append(h('h2', '', 'Задания дня'), tasks);
       const s = p.season;
       box.append(h('h2', '', 'Сезон'), h('p', '', `Уровень ${s.level} из ${s.rewards.length}: ${s.points} очков, уровень каждые ${s.perLevel}. Последняя награда: аура «Корона сезона».`));
-      box.append(h('h2', '', 'Ауры'), h('p', '', 'Цветное кольцо под котом. Друзья видят его у вашего призрака.'));
+      box.append(h('h2', '', 'Ауры'), h('p', '', 'Цветное кольцо под героем. Друзья видят его у вашего призрака.'));
       const shop = h('div', 'shop');
       for (const f of FRAMES) {
         const owned = p.owned.includes(f.id);
         const worn = p.frame === f.id;
-        const label = worn ? `${f.name}: снять` : owned ? `${f.name}: надеть` : f.exclusive ? `${f.name}: только в сезоне` : `${f.name}: ${f.price} 🐟`;
+        const label = worn ? `${f.name}: снять` : owned ? `${f.name}: надеть` : f.exclusive ? `${f.name}: только в сезоне` : `${f.name}: ${f.price} 🪙`;
         const b = button(label, `item aura-${f.id}${worn ? ' on' : ''}`, async () => {
           try {
             render(await api!.shop(owned ? 'equip' : 'buy', worn ? null : f.id));
@@ -940,7 +1005,7 @@ function answersScreen(): void {
     if (!list.length) return;
     const ul = h('ul', 'tasks');
     for (const a of list) {
-      ul.append(h('li', a.isNew ? 'new' : '', `${a.beat ? '😾' : '😼'} ${a.userName}: ${scoreText(a)} · ${a.beat ? 'продержался лучше вас' : 'вы лучше'}`));
+      ul.append(h('li', a.isNew ? 'new' : '', `${a.beat ? '😤' : '💪'} ${a.userName}: ${scoreText(a)} · ${a.beat ? 'продержался лучше вас' : 'вы лучше'}`));
     }
     box.append(ul);
   });
@@ -965,8 +1030,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) pauseMenu();
 });
 
-void loadSprites().then(() => {
+{
   const param = startParam();
   if (api && param.startsWith('d_')) duelScreen(param.slice(2));
   else menu();
-});
+}
