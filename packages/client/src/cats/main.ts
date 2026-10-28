@@ -2,7 +2,7 @@ import { cats, FRAMES } from '@otryad/core';
 import { haptic, initTelegram, setBack, shareLink, startParam } from '../telegram.ts';
 import { ApiError, connect, type Finished, type HeroInfo, type Profile, type Score, type Started } from './api.ts';
 import { Game, type GameOptions, type RunRecord } from './game.ts';
-import { heroSprite, loadArt, sprite, type SpriteId } from './sprites.ts';
+import { artElement, heroSprite, loadArt, sprite, type SpriteId } from './sprites.ts';
 import './style.css';
 
 const { RUN_SECONDS, TICK_RATE, cardName, cardText, isWeapon } = cats;
@@ -62,10 +62,45 @@ const mmss = (ticks: number) => {
 };
 const scoreText = (s: { won: boolean; ticks: number; kills: number }) => `${s.won ? 'выстоял' : mmss(s.ticks)} · ${s.kills} врагов`;
 
+// Emoji in interface text are shown as drawn icons from the atlas.
+const EMOJI_ART: Record<string, string> = {
+  '💰': 'coin',
+  '💀': 'skull',
+  '👻': 'ghost',
+  '🎲': 'dice',
+  '🧰': 'chest',
+  '✨': 'star',
+  '🔒': 'lock',
+  '🛡️': 'shield',
+  '🗺️': 'map',
+  '📅': 'sun',
+  '🏆': 'cup',
+  '⚔️': 'swords',
+  '💬': 'scroll',
+  '❤': 'heart',
+  '😤': 'swords',
+  '💪': 'bigpaws',
+};
+const EMOJI_RE = new RegExp(`(${Object.keys(EMOJI_ART).join('|')})`, 'u');
+
+// Sets an element's text, with the known emoji drawn as pixel icons.
+function setText(el: HTMLElement, text: string): void {
+  if (!EMOJI_RE.test(text)) {
+    el.textContent = text;
+    return;
+  }
+  el.replaceChildren(
+    ...text.split(EMOJI_RE).map((part) => {
+      const name = EMOJI_ART[part];
+      return (name && artElement(`ico:${name}`, 'em')) || part;
+    }),
+  );
+}
+
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', text = ''): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
   if (cls) el.className = cls;
-  if (text) el.textContent = text;
+  if (text) setText(el, text);
   return el;
 }
 
@@ -101,8 +136,12 @@ const ICONS: Record<CardId, SpriteId | string> = {
   fishes: '💰',
 };
 
-function icon(id: CardId, px = 40): HTMLElement {
-  const v = ICONS[id];
+// The drawn icon of an item (its evolution's if `evo`), or of an atlas icon
+// name; the emoji stays as the fallback.
+function icon(id: CardId | string, px = 40, evo = false): HTMLElement {
+  const drawn = artElement(`ico:${evo ? `evo:${id}` : id}`, 'ico');
+  if (drawn) return drawn;
+  const v = ICONS[id as CardId] ?? '';
   if (v === 'feather' || v === 'arrow' || v === 'charm' || v === 'axe') {
     const img = sprite(v, px * 2);
     const c = h('canvas', 'ico');
@@ -143,7 +182,7 @@ function inventory(run: CatRun): HTMLElement {
       }
       const evo = isWeapon(k) && run.evolved[k];
       const cell = h('div', evo ? 'cell evo' : 'cell');
-      cell.append(icon(k, 30), pips(run.lvl(k), cats.itemMax(k)));
+      cell.append(icon(k, 30, !!evo), pips(run.lvl(k), cats.itemMax(k)));
       r.append(cell);
     }
     return r;
@@ -324,7 +363,7 @@ function tell(room: RoomId, then: () => void): void {
   const s = load();
   if (!s.story?.includes(room)) save({ ...s, story: [...(s.story ?? []), room] });
   let i = 0;
-  const pic = h('div', 'big');
+  const pic = h('div', 'big scenebox');
   const text = h('p', 'tale');
   const next = button('', 'btn', () => {
     i++;
@@ -333,7 +372,10 @@ function tell(room: RoomId, then: () => void): void {
   });
   const box = overlay(h('h1', '', tale.title), pic, text, next, button('Пропустить', 'btn secondary', () => then()));
   const show = () => {
-    pic.textContent = tale.frames[i][0];
+    // The drawn scene of the frame, the emoji if the atlas is missing.
+    const scene = artElement(`tale_${room}_${i}`, 'scene');
+    if (scene) pic.replaceChildren(scene);
+    else pic.textContent = tale.frames[i][0];
     text.textContent = tale.frames[i][1];
     next.textContent = i < tale.frames.length - 1 ? 'Дальше' : 'В путь!';
   };
@@ -414,9 +456,11 @@ function hud(ghostName?: string): HTMLElement {
       <div class="bar hp"><i></i><b></b></div>
       <div class="bar xp"><i></i><b></b></div>
     </div>
-    <div class="stats"><span class="time"></span><span class="ghostline"></span><span class="kills"></span></div>
+    <div class="stats"><span class="time"></span><span class="ghostline"></span><span class="kills"><b></b></span></div>
     <div class="slots"></div>`;
   if (ghostName) top.dataset.ghost = ghostName;
+  // The icons are put in once; the numbers beside them change every frame.
+  top.querySelector('.kills')!.prepend(icon('skull'), ' ');
   top.append(button('❚❚', 'pause', () => pauseMenu()));
   return top;
 }
@@ -430,7 +474,7 @@ function updateHud(run: CatRun, ghost: CatRun | null): void {
   (el.querySelector('.xp i') as HTMLElement).style.width = `${(100 * run.xp) / run.need}%`;
   el.querySelector('.xp b')!.textContent = `ур. ${run.level}`;
   el.querySelector('.time')!.textContent = `${mmss(run.tick)} / ${mmss(RUN_SECONDS * TICK_RATE)}`;
-  el.querySelector('.kills')!.textContent = `💀 ${run.kills}`;
+  el.querySelector('.kills b')!.textContent = `${run.kills}`;
   const who = el.dataset.ghost ?? 'призрак';
   // Owned weapons and passives with levels, redrawn only when they change.
   const slots = el.querySelector<HTMLElement>('.slots')!;
@@ -442,14 +486,19 @@ function updateHud(run: CatRun, ghost: CatRun | null): void {
       for (const k of ids) {
         const evo = isWeapon(k) && run.evolved[k];
         const u = h('span', evo ? 'slot evo' : 'slot');
-        u.append(icon(k, 18), h('b', '', evo ? '★' : String(run.lvl(k))));
+        u.append(icon(k, 18, !!evo), h('b', '', evo ? '★' : String(run.lvl(k))));
         r.append(u);
       }
       return r;
     };
     slots.replaceChildren(row(run.weapons()), row(run.passives()));
   }
-  el.querySelector('.ghostline')!.textContent = ghost ? (ghost.over ? `👻 ${who}: ${ghost.won ? 'выстоял' : mmss(ghost.tick)}` : `👻 ${who} жив`) : '';
+  const line = ghost ? (ghost.over ? `👻 ${who}: ${ghost.won ? 'выстоял' : mmss(ghost.tick)}` : `👻 ${who} жив`) : '';
+  const gl = el.querySelector<HTMLElement>('.ghostline')!;
+  if (gl.dataset.text !== line) {
+    gl.dataset.text = line;
+    setText(gl, line);
+  }
 }
 
 function levelUp(cards: CardId[], levels: number[], choose: (i: number) => void, reroll: (() => void) | null): void {
@@ -500,7 +549,7 @@ function chestScreen(e: { evolved: cats.WeaponId[]; items: ItemId[] }): void {
   const rows: HTMLElement[] = [];
   for (const w of e.evolved) {
     const r = h('div');
-    r.append(icon(w, 30), h('b', '', `★ ${cats.EVOLUTIONS[w].name}`), h('span', 'lv', 'эволюция!'));
+    r.append(icon(w, 30, true), h('b', '', `★ ${cats.EVOLUTIONS[w].name}`), h('span', 'lv', 'эволюция!'));
     rows.push(r);
   }
   for (const k of e.items) {
@@ -511,7 +560,7 @@ function chestScreen(e: { evolved: cats.WeaponId[]; items: ItemId[] }): void {
   if (!rows.length) rows.push(h('div', '', '+10 💰'));
   setTimeout(() => {
     chest.classList.add('open');
-    chest.textContent = '✨';
+    setText(chest, '✨');
     stage.prepend(h('div', 'rays'));
     rows.forEach((r, i) => setTimeout(() => loot.append(r), 250 + i * 350));
     setTimeout(() => (done.style.visibility = 'visible'), 250 + rows.length * 350);
@@ -583,7 +632,7 @@ function collectionScreen(): void {
   }
   for (const w of cats.WEAPON_IDS) {
     const evo = cats.EVOLUTIONS[w];
-    entries.push({ key: `evo:${w}`, icon: () => icon(w, 30), name: `★ ${evo.name}`, text: evo.desc, hint: `Нужно: ${cats.WEAPONS[w].name} ур. ${cats.WEAPON_MAX} + ${cats.PASSIVES[evo.passive].name}, сундук после ${Math.floor(cats.EVOLVE_TICK / cats.TICK_RATE / 60)}:00` });
+    entries.push({ key: `evo:${w}`, icon: () => icon(w, 30, true), name: `★ ${evo.name}`, text: evo.desc, hint: `Нужно: ${cats.WEAPONS[w].name} ур. ${cats.WEAPON_MAX} + ${cats.PASSIVES[evo.passive].name}, сундук после ${Math.floor(cats.EVOLVE_TICK / cats.TICK_RATE / 60)}:00` });
   }
   for (const id of cats.PASSIVE_IDS) {
     const def = cats.PASSIVES[id];
@@ -778,20 +827,21 @@ function heroScreen(): void {
 // Permanent bonuses for gold (fish in the code), as in VS: a grid of cells with their rank
 // squares, a panel about the one picked with its price, and a reset that
 // gives all the gold back. Every level bought makes the next ones dearer.
+// Atlas icons of the Power Ups; most are the passives' pictures.
 const POWER_ICONS: Record<cats.PowerId, string> = {
-  might: '🥣',
-  armor: '🛡️',
-  maxHp: '🍞',
-  recovery: '🍎',
-  move: '👟',
-  area: '💪',
-  cooldown: '📖',
-  magnet: '🧲',
-  luck: '🍀',
-  growth: '👑',
-  greed: '💰',
-  reroll: '🎲',
-  revive: '💨',
+  might: 'food',
+  armor: 'shield',
+  maxHp: 'belly',
+  recovery: 'purr',
+  move: 'boots',
+  area: 'bigpaws',
+  cooldown: 'box',
+  magnet: 'catnip',
+  luck: 'clover',
+  growth: 'crown',
+  greed: 'fishes',
+  reroll: 'dice',
+  revive: 'wind',
 };
 
 function powerScreen(): void {
@@ -827,7 +877,7 @@ function powerScreen(): void {
           b.disabled = p.fish < price;
           buy.append(h('span', '', `${price} 💰`), b);
         }
-        const ic = h('span', 'ico emoji', POWER_ICONS[id]);
+        const ic = icon(POWER_ICONS[id]);
         detail.replaceChildren(ic, text, buy);
       };
       for (const id of cats.POWER_IDS) {
@@ -838,7 +888,7 @@ function powerScreen(): void {
           cell.classList.add('on');
           show(id);
         });
-        cell.append(h('span', 'name', def.name), h('span', 'ico emoji', POWER_ICONS[id]), pips(p.powers[id] ?? 0, def.max));
+        cell.append(h('span', 'name', def.name), icon(POWER_ICONS[id]), pips(p.powers[id] ?? 0, def.max));
         grid.append(cell);
       }
       show(picked);
@@ -870,7 +920,7 @@ function unlockScreen(): void {
       const def = cats.ROOMS[id];
       if (!def.after) continue;
       const done = !!p?.rooms.find((r) => r.id === id)?.owned;
-      rows.push({ done, what: `Продержитесь 20 минут: «${cats.ROOMS[def.after].name}»`, icon: () => h('span', 'ico emoji', '🗺️'), detail: `Открывает локацию: ${def.name}` });
+      rows.push({ done, what: `Продержитесь 20 минут: «${cats.ROOMS[def.after].name}»`, icon: () => icon('map'), detail: `Открывает локацию: ${def.name}` });
     }
     const detail = h('div', 'detail frame');
     const list = h('ul', 'unlocks');
@@ -950,7 +1000,7 @@ function leagueScreen(): void {
     const l = await api!.league();
     const ends = new Date(l.endsAt).toLocaleDateString('ru-RU', { weekday: 'long' });
     box.replaceChildren(
-      h('p', 'best', `${LEAGUES[l.league]} лига${l.moved > 0 ? ' ⬆️' : l.moved < 0 ? ' ⬇️' : ''}`),
+      h('p', 'best', `${LEAGUES[l.league]} лига${l.moved > 0 ? ' ▲' : l.moved < 0 ? ' ▼' : ''}`),
       h('p', '', `${l.points} очков · место ${l.rank ?? '—'} из ${l.size}. Очки дают первые ${l.runsPerDay} забега в день (сегодня ${l.runsToday}). Неделя закончится в ${ends}: первые ${l.up} поднимутся${l.down ? `, последние ${l.down} опустятся` : ''}.`),
       table(l.top, 'В лиге пока никого нет.'),
     );
@@ -964,7 +1014,7 @@ function profileScreen(): void {
       box.replaceChildren(h('p', 'best', `💰 ${p.fish}`));
       const tasks = h('ul', 'tasks');
       for (const t of p.tasks) {
-        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✅' : '▫️'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 💰`));
+        tasks.append(h('li', t.done ? 'done' : '', `${t.done ? '✓' : '·'} ${t.title}: ${t.progress}/${t.goal} · ${t.reward} 💰`));
       }
       box.append(h('h2', '', 'Задания дня'), tasks);
       const s = p.season;

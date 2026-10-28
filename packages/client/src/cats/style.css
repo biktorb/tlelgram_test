@@ -324,3 +324,13 @@ html, body {
 /* The tale: frames before a location and the epilogue after a win. */
 .tale { font-size: 17px; line-height: 1.45; max-width: 420px; margin: 8px auto 14px; text-align: center; }
 .tale-link { color: #e6c24a; text-decoration: underline; cursor: pointer; margin-top: 2px; }
+
+/* Drawn pixel icons and tale scenes keep hard pixels. Icons in text are
+   sized by the font, so they grow with it. */
+canvas.ico,
+canvas.em,
+canvas.scene { image-rendering: pixelated; }
+canvas.em { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; }
+.kills .ico { width: 18px; height: 18px; vertical-align: -3px; }
+.scenebox { line-height: 0; }
+canvas.scene { width: min(384px, 88vw); height: auto; aspect-ratio: 16 / 9; border: 3px solid var(--gold); border-radius: 6px; box-shadow: 0 4px 14px #0008; }

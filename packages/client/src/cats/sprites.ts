@@ -41,6 +41,20 @@ export function art(name: string): [HTMLImageElement, Rect] | null {
   return atlas && r ? [atlas, r] : null;
 }
 
+// A fresh canvas with an atlas picture at its own size, for the DOM (CSS
+// scales it with hard pixels); null if the atlas lacks it.
+export function artElement(name: string, cls: string): HTMLCanvasElement | null {
+  const a = art(name);
+  if (!a) return null;
+  const [img, [x, y, w, h]] = a;
+  const c = document.createElement('canvas');
+  c.className = cls;
+  c.width = w;
+  c.height = h;
+  c.getContext('2d')!.drawImage(img, x, y, w, h, 0, 0, w, h);
+  return c;
+}
+
 // An atlas picture scaled up by a whole number with hard pixel edges, for
 // patterns and big things the game stretches itself.
 const big = new Map<string, HTMLCanvasElement>();
