@@ -202,8 +202,8 @@ export class Game {
       duelCode = duel.code;
     } else duelCode = null;
     // Every mode is played with the player's own cat, a duel too.
-    if (!(await this.heroes(userId)).find((h) => h.id === hero)?.owned) throw new GameError(422, 'Этот кот ещё не открыт');
-    if (mode === 'free' && !(await this.rooms(userId)).find((r) => r.id === room)?.owned) throw new GameError(422, 'Эта комната ещё не открыта');
+    if (!(await this.heroes(userId)).find((h) => h.id === hero)?.owned) throw new GameError(422, 'Этот герой ещё не открыт');
+    if (mode === 'free' && !(await this.rooms(userId)).find((r) => r.id === room)?.owned) throw new GameError(422, 'Эта локация ещё не открыта');
 
     const active = await this.store.activeRun(userId);
     if (active) await this.settle(active, playerName, active.record ?? { moves: '', picks: '' });
@@ -443,15 +443,15 @@ export class Game {
       if (from >= cats.POWERS[power].max) throw new GameError(422, 'Это усиление уже на максимуме');
       const price = cats.powerPrice(power, powers);
       const res = await this.store.buyPower(userId, power, from, price);
-      if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
+      if (res === 'poor') throw new GameError(422, 'Не хватает злата');
       if (res === 'ok') await this.track(userId, 'shop_buy', { item, price });
       return this.profile(userId);
     }
     const hero = item.startsWith('hero:') ? item.slice(5) : '';
     if (cats.isHero(hero)) {
       const u: cats.HeroDef['unlock'] = cats.HEROES[hero].unlock;
-      if (!u || !('fish' in u)) throw new GameError(422, 'Этого кота нельзя купить, он открывается сам');
-      if ((await this.store.buyItem(userId, item, u.fish)) === 'poor') throw new GameError(422, 'Не хватает рыбок');
+      if (!u || !('fish' in u)) throw new GameError(422, 'Этого героя нельзя купить, он открывается сам');
+      if ((await this.store.buyItem(userId, item, u.fish)) === 'poor') throw new GameError(422, 'Не хватает злата');
       await this.track(userId, 'shop_buy', { item, price: u.fish });
       return this.profile(userId);
     }
@@ -459,7 +459,7 @@ export class Game {
     if (!frame) throw new GameError(404, 'Такого товара нет');
     if (frame.exclusive) throw new GameError(422, 'Эту ауру можно только заработать в сезоне');
     const res = await this.store.buyItem(userId, frame.id, frame.price);
-    if (res === 'poor') throw new GameError(422, 'Не хватает рыбок');
+    if (res === 'poor') throw new GameError(422, 'Не хватает злата');
     if (res === 'ok') {
       await this.store.setFrame(userId, frame.id);
       await this.track(userId, 'shop_buy', { item: frame.id, price: frame.price });

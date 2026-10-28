@@ -1,4 +1,4 @@
-// Balance check for «Коты против пылесосов»: bots of three skill levels play
+// Balance check for «Богатыри против нечисти»: bots of three skill levels play
 // full runs, and the table shows how long they last and when the build is full.
 // Usage: node tools/cats-balance.ts [runs per cell] [cat|all] [room|all] [max]
 // `max` gives the bots every Power Up at its top level.

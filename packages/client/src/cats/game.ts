@@ -1,5 +1,5 @@
 import { cats } from '@otryad/core';
-import { CAT_SIZE, catSprite, flashSprite, sprite, type SpriteId } from './sprites.ts';
+import { HERO_SIZE, flashSprite, heroSprite, sprite, type SpriteId } from './sprites.ts';
 
 const { CatRun, DT, Recorder, decodeMoves, dirFromVector, resume } = cats;
 type CatRun = InstanceType<typeof cats.CatRun>;
@@ -21,8 +21,8 @@ export interface GameHooks {
 export interface GameOptions {
   ghost?: RunRecord; // a run to race against, from the same seed
   progress?: RunRecord; // input of an unfinished run, to continue it
-  hero?: cats.HeroId; // the player's cat
-  ghostHero?: cats.HeroId; // the cat the ghost played
+  hero?: cats.HeroId; // the player's hero
+  ghostHero?: cats.HeroId; // the hero the ghost played
   room?: cats.RoomId; // the ghost plays the same room
   powers?: cats.Powers; // the player's Power Ups
   ghostPowers?: cats.Powers;
@@ -92,70 +92,75 @@ class Ghost {
   }
 }
 
-// The picture of each kind, and a colour over it for the kinds that share one.
+// The picture of each kind, and a colour over it for the stronger kinds that
+// share a picture with a weaker one.
 const ENEMY_SPRITE: Record<cats.EnemyKind, [SpriteId, string?]> = {
-  mouse: ['mouse'],
-  redmouse: ['mouse', '#e0303a'],
-  dust: ['dust'],
-  mite: ['dust', '#8a4fc9'],
-  moth: ['pigeon', '#f2ecd0'],
-  robot: ['vacuum'],
-  wetbot: ['vacuum', '#3fae5a'],
-  rat: ['mouse', '#4a4a55'],
-  brush: ['washer', '#e07a1f'],
-  bigvac: ['industrial', '#9b2c2c'],
-  bigrobot: ['vacuum', '#d4a017'],
-  mop: ['boss'],
-  pigeon: ['pigeon'],
-  crow: ['pigeon', '#1f1f2a'],
-  dog: ['dog'],
-  trimmer: ['mower', '#d9452b'],
-  wasp: ['pigeon', '#f2c21b'],
-  mower: ['mower'],
-  tractor: ['mower', '#2f8a3a'],
-  goose: ['pigeon', '#ffffff'],
-  hound: ['bulldog', '#5a3d22'],
-  combine: ['blower', '#c97a1f'],
-  bulldog: ['bulldog'],
-  blower: ['blower'],
-  minibot: ['minibot'],
-  redbot: ['minibot', '#e0303a'],
-  hose: ['hose'],
-  scrubber: ['washer', '#2aa5a0'],
-  drone: ['minibot', '#3a7bd5'],
-  washer: ['washer'],
-  steamer: ['washer', '#f4f4f4'],
-  roller: ['minibot', '#f08a24'],
-  cyclone: ['industrial', '#7b3fc9'],
-  tank: ['industrial', '#55606e'],
-  industrial: ['industrial'],
-  king: ['king'],
-  wall: ['dust', '#5a4a3a'],
-  cleaner: ['cleaner'],
+  mouse: ['bat'],
+  redmouse: ['bat', '#e0303a'],
+  dust: ['stump'],
+  mite: ['kikimora'],
+  moth: ['wisp'],
+  robot: ['boar'],
+  wetbot: ['bear'],
+  rat: ['wolf', '#2a2a35'],
+  brush: ['wolf'],
+  bigvac: ['leshy'],
+  bigrobot: ['hut'],
+  mop: ['yaga'],
+  pigeon: ['bird'],
+  crow: ['bird', '#ffffff'],
+  trimmer: ['robber'],
+  goose: ['goose'],
+  wasp: ['hornet'],
+  mower: ['flail'],
+  tractor: ['tur'],
+  dog: ['wolf', '#5a2a1a'],
+  hound: ['rider'],
+  combine: ['ataman'],
+  bulldog: ['son'],
+  blower: ['solovey'],
+  minibot: ['bones'],
+  redbot: ['bones', '#ff6a1e'],
+  hose: ['snake'],
+  scrubber: ['guard'],
+  drone: ['dragonling'],
+  washer: ['sorcerer'],
+  steamer: ['bonehorse'],
+  roller: ['chudo'],
+  cyclone: ['knight'],
+  tank: ['idol'],
+  industrial: ['likho'],
+  king: ['gorynych'],
+  wall: ['thistle'],
+  cleaner: ['koschei'],
 };
-// The floor of each room: two checker colours and the line between tiles.
+// The ground of each location: two checker colours and the line between tiles.
 const FLOORS: Record<cats.RoomId, [string, string, string]> = {
-  flat: ['#e9dcc6', '#dfcfb4', 'rgba(120, 90, 60, .18)'],
-  yard: ['#a9d38b', '#9fcb80', 'rgba(60, 110, 40, .15)'],
-  warehouse: ['#c9ccd3', '#bfc3cb', 'rgba(70, 76, 90, .2)'],
+  flat: ['#7fa860', '#77a058', 'rgba(40, 70, 30, .10)'],
+  yard: ['#c9a874', '#c1a06b', 'rgba(110, 80, 40, .12)'],
+  warehouse: ['#8f8896', '#857e8c', 'rgba(30, 24, 36, .25)'],
 };
 const BOSS_TEXT: Record<cats.RoomId, [string, string]> = {
-  flat: ['Идёт Швабра!', 'Швабра сломана!'],
-  yard: ['Идёт Листодув!', 'Листодув заглох!'],
-  warehouse: ['Идёт Король пылесосов!', 'Король свергнут!'],
+  flat: ['Летит Баба-Яга!', 'Баба-Яга повержена!'],
+  yard: ['Свистит Соловей-Разбойник!', 'Соловей связан!'],
+  warehouse: ['Идёт Змей Горыныч!', 'Змей Горыныч повержен!'],
 };
-const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🍗', catnip: '🌿', alarm: '⏰', plug: '🔌', coin: '🐟', chest: '🎁' };
-// Breakable things on the floor, one kind per room.
-const PROP_ICON: Record<cats.RoomId, string> = { flat: '🏺', yard: '🪴', warehouse: '📦' };
-const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Мята!', alarm: 'Будильник!', plug: 'Пылесосы выключены!', coin: '+5 🐟', chest: '' };
+const PICKUP_ICON: Record<cats.PickupKind, string> = { food: '🥧', catnip: '🌪️', alarm: '🔔', plug: '🌿', coin: '🪙', chest: '🎁' };
+// Breakable things on the ground, one kind per location.
+const PROP_ICON: Record<cats.RoomId, string> = { flat: '🧺', yard: '🛢️', warehouse: '⚱️' };
+const PICKUP_TEXT: Record<cats.PickupKind, string> = { food: '+30 ❤', catnip: 'Вихрь!', alarm: 'Набат!', plug: 'Нечисть уснула!', coin: '+5 🪙', chest: '' };
+// Obstacles keep the furniture kinds of the sim: in the forest a sofa is a
+// fallen log, a table a boulder, a wardrobe a fir; on the road a flowerbed
+// is bushes, a bench a cart, a car a haystack; in the castle shelves are
+// stone walls.
 const FURNITURE_COLORS: Record<cats.FurnitureKind, [string, string, string]> = {
-  sofa: ['#6f8fc9', '#8eaadb', '#46639a'],
-  table: ['#b07a4a', '#c99563', '#7d5230'],
-  wardrobe: ['#8a5a3b', '#a2714f', '#5e3a22'],
-  flowerbed: ['#8a5a3b', '#e86f8f', '#5e3a22'],
-  bench: ['#c98a4b', '#e0a668', '#7d5230'],
-  car: ['#4f7fd0', '#a9c6f0', '#2f4f8a'],
-  shelf: ['#8a6a4a', '#d7b98a', '#5a4430'],
+  sofa: ['#8a5f37', '#c49a6c', '#4f3420'],
+  table: ['#8e939c', '#aab0b8', '#5a5f68'],
+  wardrobe: ['#2f6a37', '#3f8a47', '#1f4a25'],
+  flowerbed: ['#4f8a3a', '#6aa84f', '#2a5a1f'],
+  bench: ['#9a6a3a', '#b8864f', '#5a3a1a'],
+  car: ['#d9b45a', '#e8c873', '#8a6a20'],
+  shelf: ['#6a6470', '#7c7682', '#3a3440'],
 };
 
 export class Game {
@@ -284,7 +289,7 @@ export class Game {
     this.cv.width = Math.round(this.W * this.dpr);
     this.cv.height = Math.round(this.H * this.dpr);
     // World units per screen pixel: the screen shows as much as the sim
-    // counts as on screen (12 cats across a phone) and no more, so enemies
+    // counts as on screen (13.5 heroes across a phone) and no more, so enemies
     // always come from beyond its edge.
     this.zoom = Math.min((2 * cats.SCREEN_X) / this.W, (2 * cats.SCREEN_Y) / this.H);
     this.floor = null;
@@ -410,7 +415,7 @@ export class Game {
         this.shake = 10;
         break;
       case 'cleaner':
-        this.text(this.run.player.x, this.run.player.y - 70, '20:00! Пришла Уборщица, беги!', '#ff6b6b', 22, 2.5);
+        this.text(this.run.player.x, this.run.player.y - 70, '20:00! Пришёл Кощей Бессмертный, беги!', '#ff6b6b', 22, 2.5);
         this.shake = 16;
         break;
       case 'elite':
@@ -484,9 +489,9 @@ export class Game {
     return p ? [p[0] + (x - p[0]) * a, p[1] + (y - p[1]) * a] : [x, y];
   }
 
-  private blitCat(hero: cats.HeroId, x: number, y: number, size: number, flip: boolean): void {
+  private blitHero(hero: cats.HeroId, x: number, y: number, size: number, flip: boolean): void {
     const px = (size / this.zoom) * this.dpr;
-    this.ctx.drawImage(catSprite(hero, px, flip), x - size / 2, y - size / 2, size, size);
+    this.ctx.drawImage(heroSprite(hero, px, flip), x - size / 2, y - size / 2, size, size);
   }
 
   private blit(id: SpriteId, x: number, y: number, size: number, flip = false, flash = false, tint?: string): void {
@@ -501,64 +506,113 @@ export class Game {
   private drawFurniture(f: cats.Furniture): void {
     const c = this.ctx;
     const [body, top, edge] = FURNITURE_COLORS[f.kind];
-    c.fillStyle = 'rgba(60, 40, 20, .2)';
+    c.fillStyle = 'rgba(30, 20, 10, .2)';
     c.fillRect(f.x + 6, f.y + 8, f.w, f.h);
-    c.fillStyle = body;
     c.strokeStyle = edge;
     c.lineWidth = 3;
-    c.beginPath();
-    c.roundRect(f.x, f.y, f.w, f.h, 8);
-    c.fill();
-    c.stroke();
-    c.fillStyle = top;
-    if (f.kind === 'sofa') {
-      // Cushions along the long side.
-      const n = 3;
-      const along = f.w >= f.h;
-      for (let i = 0; i < n; i++) {
-        c.beginPath();
-        if (along) c.roundRect(f.x + 8 + (i * (f.w - 16)) / n, f.y + 10, (f.w - 16) / n - 4, f.h - 18, 6);
-        else c.roundRect(f.x + 10, f.y + 8 + (i * (f.h - 16)) / n, f.w - 18, (f.h - 16) / n - 4, 6);
-        c.fill();
-      }
-    } else if (f.kind === 'shelf') {
-      // Boxes on the shelf.
-      for (let x = f.x + 8; x + 30 < f.x + f.w; x += 38) c.fillRect(x, f.y + 7, 30, f.h - 14);
-    } else if (f.kind === 'car') {
+    const round = (x: number, y: number, w: number, h: number, r: number, fill: string) => {
+      c.fillStyle = fill;
       c.beginPath();
-      c.roundRect(f.x + f.w * 0.25, f.y + 10, f.w * 0.5, f.h - 20, 8);
+      c.roundRect(x, y, w, h, r);
       c.fill();
-    } else if (f.kind === 'flowerbed') {
-      // Flowers in rows.
-      for (let x = f.x + 14; x < f.x + f.w - 8; x += 22) {
-        for (let y = f.y + 16; y < f.y + f.h - 8; y += 20) {
+      c.stroke();
+    };
+    const dots = (step: number, r: number, fill: string, inset = r + 4) => {
+      c.fillStyle = fill;
+      for (let x = f.x + inset; x <= f.x + f.w - inset + 0.1; x += step) {
+        for (let y = f.y + inset; y <= f.y + f.h - inset + 0.1; y += step) {
           c.beginPath();
-          c.arc(x, y, 6, 0, Math.PI * 2);
+          c.arc(x, y, r, 0, Math.PI * 2);
           c.fill();
+          c.stroke();
         }
       }
-    } else if (f.kind === 'table' || f.kind === 'bench') {
-      c.beginPath();
-      c.roundRect(f.x + 8, f.y + 8, f.w - 16, f.h - 16, 6);
-      c.fill();
-    } else {
-      // Wardrobe doors.
-      c.fillRect(f.x + 6, f.y + 6, f.w - 12, f.h - 12);
-      c.strokeStyle = edge;
-      c.lineWidth = 2;
-      c.beginPath();
-      if (f.w < f.h) {
-        c.moveTo(f.x + f.w / 2, f.y + 6);
-        c.lineTo(f.x + f.w / 2, f.y + f.h - 6);
-      } else {
-        c.moveTo(f.x + 6, f.y + f.h / 2);
-        c.lineTo(f.x + f.w - 6, f.y + f.h / 2);
+    };
+    const along = f.w >= f.h;
+    switch (f.kind) {
+      case 'sofa': {
+        // A log: bark with rings at both ends.
+        round(f.x, f.y, f.w, f.h, Math.min(f.w, f.h) / 2, body);
+        const r = Math.min(f.w, f.h) / 2 - 4;
+        for (const [x, y] of along ? [[f.x + r + 4, f.y + f.h / 2], [f.x + f.w - r - 4, f.y + f.h / 2]] : [[f.x + f.w / 2, f.y + r + 4], [f.x + f.w / 2, f.y + f.h - r - 4]]) {
+          c.fillStyle = top;
+          c.beginPath();
+          c.arc(x, y, r, 0, Math.PI * 2);
+          c.fill();
+          c.stroke();
+        }
+        break;
       }
-      c.stroke();
+      case 'table':
+        round(f.x, f.y, f.w, f.h, Math.min(f.w, f.h) * 0.4, body);
+        c.fillStyle = top;
+        c.beginPath();
+        c.ellipse(f.x + f.w * 0.4, f.y + f.h * 0.35, f.w * 0.25, f.h * 0.18, 0, 0, Math.PI * 2);
+        c.fill();
+        break;
+      case 'wardrobe':
+      case 'flowerbed':
+        // Tree crowns or bushes: overlapping round tufts.
+        round(f.x, f.y, f.w, f.h, 16, body);
+        dots(f.kind === 'wardrobe' ? 34 : 24, f.kind === 'wardrobe' ? 15 : 10, top);
+        if (f.kind === 'flowerbed') dots(24, 3, '#e86f8f', 14);
+        break;
+      case 'bench': {
+        // A cart: the box and two wheels.
+        round(f.x, f.y, f.w, f.h, 6, body);
+        c.fillStyle = top;
+        c.fillRect(f.x + 8, f.y + 8, f.w - 16, f.h - 16);
+        for (const k of [0.25, 0.75]) {
+          const x = along ? f.x + f.w * k : f.x - 4;
+          const y = along ? f.y - 4 : f.y + f.h * k;
+          c.fillStyle = '#5a3a1a';
+          c.beginPath();
+          c.arc(x, y, 9, 0, Math.PI * 2);
+          c.arc(along ? x : x + f.w + 8, along ? y + f.h + 8 : y, 9, 0, Math.PI * 2);
+          c.fill();
+        }
+        break;
+      }
+      case 'car':
+        // A haystack.
+        round(f.x, f.y, f.w, f.h, Math.min(f.w, f.h) / 2, body);
+        c.strokeStyle = '#b8923a';
+        c.lineWidth = 2;
+        for (let i = 1; i < 5; i++) {
+          c.beginPath();
+          if (along) {
+            c.moveTo(f.x + (f.w * i) / 5, f.y + 6);
+            c.lineTo(f.x + (f.w * i) / 5 - 6, f.y + f.h - 6);
+          } else {
+            c.moveTo(f.x + 6, f.y + (f.h * i) / 5);
+            c.lineTo(f.x + f.w - 6, f.y + (f.h * i) / 5 - 6);
+          }
+          c.stroke();
+        }
+        break;
+      default: {
+        // Stone blocks in rows.
+        c.fillStyle = body;
+        c.fillRect(f.x, f.y, f.w, f.h);
+        c.strokeRect(f.x, f.y, f.w, f.h);
+        c.fillStyle = top;
+        c.lineWidth = 2;
+        const bh = Math.max(14, f.h / Math.max(1, Math.round(f.h / 22)));
+        for (let y = f.y, row = 0; y < f.y + f.h - 1; y += bh, row++) {
+          for (let x = f.x + (row % 2 ? -20 : 0); x < f.x + f.w; x += 40) {
+            const x0 = Math.max(f.x, x + 2);
+            const x1 = Math.min(f.x + f.w, x + 38);
+            if (x1 > x0) {
+              c.fillRect(x0, y + 2, x1 - x0, bh - 4);
+              c.strokeRect(x0, y + 2, x1 - x0, bh - 4);
+            }
+          }
+        }
+      }
     }
   }
 
-  // The yard's fences, the warehouse walls and its conveyor belts.
+  // The road's fences, the castle walls and the streams of the fiery river\n  // (the warehouse's conveyor belts in the sim).
   private drawWalls(px: number, py: number, view: number, t: number): void {
     const c = this.ctx;
     const map = this.run.map;
@@ -566,10 +620,10 @@ export class Game {
       if (b.y > py + view || b.y + b.h < py - view) continue;
       const x0 = Math.max(b.x, px - view);
       const x1 = Math.min(b.x + b.w, px + view);
-      c.fillStyle = '#9097a3';
+      c.fillStyle = '#d9582b';
       c.fillRect(x0, b.y, x1 - x0, b.h);
-      // Chevrons that run with the belt.
-      c.strokeStyle = 'rgba(255, 255, 255, .25)';
+      // Chevrons that run with the stream.
+      c.strokeStyle = 'rgba(255, 220, 90, .55)';
       c.lineWidth = 4;
       const dir = Math.sign(b.vx);
       const shift = (((t * b.vx) % 60) + 60) % 60;
@@ -583,7 +637,7 @@ export class Game {
     }
     const bd = map.bounds;
     if (!bd) return;
-    c.fillStyle = map.shape === 'strip' ? '#b98a5a' : '#6d717c';
+    c.fillStyle = map.shape === 'strip' ? '#3f6a33' : '#2a2530';
     const big = view * 2 + 200;
     // Everything beyond the walls is filled.
     if (bd.minY > py - view) c.fillRect(px - view, bd.minY - big, view * 2, big);
@@ -591,8 +645,8 @@ export class Game {
     if (bd.minX > px - view) c.fillRect(bd.minX - big, py - view, big, view * 2);
     if (bd.maxX < px + view) c.fillRect(bd.maxX, py - view, big, view * 2);
     if (map.shape === 'strip') {
-      // Fence posts.
-      c.fillStyle = '#8a5f37';
+      // The palisade.
+      c.fillStyle = '#7a5530';
       for (let x = Math.floor((px - view) / 40) * 40; x < px + view; x += 40) {
         c.fillRect(x, bd.minY - 26, 10, 26);
         c.fillRect(x, bd.maxY, 10, 26);
@@ -660,11 +714,11 @@ export class Game {
     // Furniture: a shadow, the body and a lighter top.
     for (const f of run.map.near(px, py, view, this.furniture)) this.drawFurniture(f);
 
-    // Water left by washers, and the blower's leaves.
+    // Poison left by sorcerers, and Solovey's leaves.
     for (const h of run.hazards) {
       if (h.kind === 'puddle') {
         c.globalAlpha = Math.min(1, h.life / 20) * 0.45;
-        c.fillStyle = '#4fa3e8';
+        c.fillStyle = '#7bd14a';
         c.beginPath();
         c.ellipse(h.x, h.y, h.r, h.r * 0.75, 0, 0, Math.PI * 2);
         c.fill();
@@ -672,7 +726,7 @@ export class Game {
     }
     c.globalAlpha = 1;
 
-    // Puddles from the glass, under everything.
+    // Puddles of living water, under everything.
     for (const zn of run.zones) {
       c.globalAlpha = Math.min(1, zn.life / 15) * 0.55;
       c.fillStyle = '#5fb7f0';
@@ -710,8 +764,9 @@ export class Game {
       }
       const wob = run.freeze > 0 || e.kind === 'robot' || e.kind === 'bigrobot' ? 0 : Math.sin(t * 12 + e.id) * 1.5;
       const size = e.r * 2.3;
-      // Charging robots face where they drive.
-      const flip = e.kind === 'robot' ? e.vx > 0 : x > px;
+      // Pictures face right: charging boars face where they run, the rest
+      // face the hero.
+      const flip = e.kind === 'robot' ? e.vx < 0 : x > px;
       const [id, tint] = ENEMY_SPRITE[e.kind];
       this.blit(id, x, y + wob, size, flip, run.tick - e.hitTick < 3, tint);
       if (e.hp < e.maxHp && (e.elite || e.kind === 'robot')) {
@@ -723,54 +778,41 @@ export class Game {
       }
     }
 
-    // Unplugged vacuums go blue.
+    // Sleep grass: everything goes blue while the enemies sleep.
     if (run.freeze > 0) {
       c.fillStyle = 'rgba(120, 180, 255, .25)';
       c.fillRect(px - (this.W / 2) * z, py - (this.H / 2) * z, this.W * z, this.H * z);
     }
 
-    // Shots: laser dots, fish pointing where they fly, spinning pots.
+    // Shots: fire feathers and arrows pointing where they fly, spinning axes.
     for (const s of run.shots) {
       const [x, y] = this.lerp(s.id, s.x, s.y, a);
+      c.save();
+      c.translate(x, y);
       if (s.kind === 'laser') {
-        c.fillStyle = '#ff2d45';
-        c.beginPath();
-        c.arc(x, y, s.r, 0, Math.PI * 2);
-        c.fill();
-        c.fillStyle = '#fff';
-        c.beginPath();
-        c.arc(x, y, s.r * 0.4, 0, Math.PI * 2);
-        c.fill();
+        c.rotate(Math.atan2(s.vy, s.vx) + Math.PI / 2 + 0.6);
+        this.blit('feather', 0, 0, Math.max(20, s.r * 3));
       } else if (s.kind === 'fish') {
-        c.save();
-        c.translate(x, y);
-        c.rotate(Math.atan2(s.vy, s.vx) + Math.PI);
-        this.blit('fish', 0, 0, 24);
-        c.restore();
+        c.rotate(Math.atan2(s.vy, s.vx));
+        this.blit('arrow', 0, 0, 30);
       } else {
-        c.save();
-        c.translate(x, y);
         c.rotate(t * 10 + s.id);
-        c.font = `${Math.round(s.r * 2)}px system-ui, sans-serif`;
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText('🪴', 0, 0);
-        c.restore();
-        c.textBaseline = 'alphabetic';
+        this.blit('axe', 0, 0, s.r * 2.2);
       }
+      c.restore();
     }
 
-    // Yarn balls orbit the cat while they spin.
+    // Charms orbit the hero while they spin.
     if (run.lvl('yarn') && run.yarnLeft > 0) {
       const w = run.weaponStats('yarn');
       const R = 72 * w.area;
       for (let i = 0; i < w.amount; i++) {
         const ang = run.yarnAngle + (i * Math.PI * 2) / w.amount;
-        this.blit('yarn', px + Math.cos(ang) * R, py + Math.sin(ang) * R, 24 * w.area);
+        this.blit('charm', px + Math.cos(ang) * R, py + Math.sin(ang) * R, 24 * w.area);
       }
     }
 
-    // Claw slashes: three scratches across the hit box.
+    // Sword strokes: three streaks across the hit box.
     for (const sl of this.slashes) {
       const k = sl.t / 0.18;
       c.globalAlpha = 1 - k;
@@ -785,7 +827,7 @@ export class Game {
     }
     c.globalAlpha = 1;
 
-    // Static sparks: a bolt from above and a flash.
+    // Lightning: a bolt from above and a flash.
     for (const sp of this.sparks) {
       const k = sp.t / 0.3;
       c.globalAlpha = 1 - k;
@@ -804,7 +846,7 @@ export class Game {
     }
     c.globalAlpha = 1;
 
-    // Meow waves.
+    // Gusli: rings of sound.
     for (const r of this.rings) {
       const k = r.t / 0.35;
       c.strokeStyle = `rgba(255, 190, 40, ${1 - k})`;
@@ -820,14 +862,14 @@ export class Game {
       const gx = this.prevGhost[0] + (g.x - this.prevGhost[0]) * a;
       const gy = this.prevGhost[1] + (g.y - this.prevGhost[1]) * a;
       c.globalAlpha = 0.45;
-      this.blitCat(this.ghost.run.hero, gx, gy, CAT_SIZE[this.ghost.run.hero] * 0.8, g.face < 0);
+      this.blitHero(this.ghost.run.hero, gx, gy, HERO_SIZE[this.ghost.run.hero] * 0.8, g.face < 0);
       c.globalAlpha = 1;
     }
 
-    // The cat blinks while invulnerable and bobs while walking.
+    // The hero blinks while invulnerable and bobs while walking.
     const moving = this.stick.on || this.keys.size > 0;
     if (p.inv <= 0 || Math.floor(run.tick / 2) % 2) {
-      // An orange ring under the cat so it stands out from the crowd.
+      // An orange ring under the hero so it stands out from the crowd.
       c.fillStyle = 'rgba(255, 138, 61, .35)';
       c.strokeStyle = 'rgba(255, 138, 61, .9)';
       c.lineWidth = 2.5;
@@ -835,7 +877,7 @@ export class Game {
       c.ellipse(px, py + 16, 22, 8, 0, 0, Math.PI * 2);
       c.fill();
       c.stroke();
-      this.blitCat(run.hero, px, py + (moving ? Math.sin(t * 16) * 2 : 0), CAT_SIZE[run.hero], p.face < 0);
+      this.blitHero(run.hero, px, py + (moving ? Math.sin(t * 16) * 2 : 0), HERO_SIZE[run.hero], p.face < 0);
     }
 
     // Particles and floating numbers on top.

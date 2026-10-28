@@ -1,9 +1,10 @@
-// Content of «Коты против пылесосов», modelled on Vampire Survivors: weapons
-// level up to 8, passives up to 5, and passives change the cat's stats that
-// every weapon reads. Numbers are tuned with `npm run balance:cats`.
+// Content of «Богатыри против нечисти», modelled on Vampire Survivors: weapons
+// level up to 8, passives up to 5, and passives change the hero's stats that
+// every weapon reads. Internal ids are still those of the cat version (cats,
+// rooms, vacuums), so saved runs replay the same; only the names changed. Numbers are tuned with `npm run balance:cats`.
 
 export type EnemyKind =
-  // Квартира
+  // Дремучий лес
   | 'mouse'
   | 'redmouse'
   | 'dust'
@@ -16,7 +17,7 @@ export type EnemyKind =
   | 'bigvac'
   | 'bigrobot'
   | 'mop'
-  // Двор
+  // Муромская дорога
   | 'pigeon'
   | 'crow'
   | 'dog'
@@ -29,7 +30,7 @@ export type EnemyKind =
   | 'combine'
   | 'bulldog'
   | 'blower'
-  // Склад пылесосов
+  // Кощеево царство
   | 'minibot'
   | 'redbot'
   | 'hose'
@@ -71,51 +72,51 @@ export interface EnemyDef {
 // ghost 10 (fast), gray mudman 70, green mudman 150, giant bat 270,
 // werewolf 180, giant mummy 500. Damage 5 → 4, 10 → 7, 14 → 10, 20 → 14.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
-  mouse: { name: 'Мышь', r: 10, hp: 1, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
-  redmouse: { name: 'Злая мышь', r: 11, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
-  dust: { name: 'Комок пыли', r: 13, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
-  mite: { name: 'Пылевой клещ', r: 13, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
-  moth: { name: 'Моль', r: 11, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
-  robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 41, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
-  wetbot: { name: 'Мокрый робот', r: 20, hp: 105, speed: 38, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
-  rat: { name: 'Крыса', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'chase' },
-  brush: { name: 'Турбощётка', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
-  bigvac: { name: 'Пылесос-гигант', r: 28, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 250, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  mouse: { name: 'Нетопырь', r: 10, hp: 1, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  redmouse: { name: 'Красный нетопырь', r: 11, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  dust: { name: 'Лешачок', r: 13, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
+  mite: { name: 'Кикимора', r: 13, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  moth: { name: 'Блуждающий огонёк', r: 11, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  robot: { name: 'Вепрь', r: 18, hp: 50, speed: 41, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  wetbot: { name: 'Медведь-шатун', r: 20, hp: 105, speed: 38, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  rat: { name: 'Волк-вожак', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'chase' },
+  brush: { name: 'Серый волк', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
+  bigvac: { name: 'Леший', r: 28, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  bigrobot: { name: 'Избушка на курьих ножках', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Баба-Яга', r: 38, hp: 250, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
-  pigeon: { name: 'Голубь', r: 11, hp: 1, speed: 64, dmg: 4, xp: 1, kb: 1, move: 'flock', fly: true },
-  crow: { name: 'Ворона', r: 12, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
-  trimmer: { name: 'Триммер', r: 15, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
-  goose: { name: 'Гусь', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
-  wasp: { name: 'Оса', r: 9, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
-  mower: { name: 'Газонокосилка', r: 22, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
-  tractor: { name: 'Мини-трактор', r: 26, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
-  dog: { name: 'Пёс', r: 16, hp: 189, speed: 47, dmg: 7, xp: 2.5, kb: 0.1, move: 'dash' }, // lunges, so a little slower
-  hound: { name: 'Овчарка', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'dash' },
-  combine: { name: 'Садовый комбайн', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
-  bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'dash' }, // hp per cat level
-  blower: { name: 'Листодув', r: 40, hp: 400, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  pigeon: { name: 'Галка', r: 11, hp: 1, speed: 64, dmg: 4, xp: 1, kb: 1, move: 'flock', fly: true },
+  crow: { name: 'Сорока-разбойница', r: 12, hp: 4, speed: 53, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  trimmer: { name: 'Разбойник с дубиной', r: 15, hp: 7, speed: 38, dmg: 7, xp: 1, kb: 0.8, move: 'chase' },
+  goose: { name: 'Гусь-лебедь', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  wasp: { name: 'Шершень', r: 9, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  mower: { name: 'Разбойник с кистенём', r: 22, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
+  tractor: { name: 'Тур', r: 26, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' },
+  dog: { name: 'Волколак', r: 16, hp: 189, speed: 47, dmg: 7, xp: 2.5, kb: 0.1, move: 'dash' }, // lunges, so a little slower
+  hound: { name: 'Разбойник на коне', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'dash' },
+  combine: { name: 'Атаман', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  bulldog: { name: 'Сын Соловья', r: 30, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'dash' }, // hp per cat level
+  blower: { name: 'Соловей-Разбойник', r: 40, hp: 400, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
-  minibot: { name: 'Мини-робот', r: 8, hp: 1, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
-  redbot: { name: 'Злой мини-робот', r: 9, hp: 4, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
-  hose: { name: 'Шланг', r: 12, hp: 7, speed: 41, dmg: 4, xp: 1, kb: 0.8, move: 'follow' },
-  scrubber: { name: 'Поломойка', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
-  drone: { name: 'Дрон', r: 10, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
-  washer: { name: 'Моющий пылесос', r: 20, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
-  steamer: { name: 'Пароочиститель', r: 24, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' }, // a chaser corners the cat in the hall
-  roller: { name: 'Робот-полотёр', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'charge' },
-  cyclone: { name: 'Циклонный пылесос', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
-  tank: { name: 'Пылесос-бак', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
-  industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
-  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  minibot: { name: 'Костяшка', r: 8, hp: 1, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  redbot: { name: 'Огненная костяшка', r: 9, hp: 4, speed: 56, dmg: 4, xp: 1, kb: 1, move: 'chase' },
+  hose: { name: 'Полоз', r: 12, hp: 7, speed: 41, dmg: 4, xp: 1, kb: 0.8, move: 'follow' },
+  scrubber: { name: 'Кощеев стражник', r: 16, hp: 10, speed: 38, dmg: 7, xp: 2, kb: 1, move: 'chase' },
+  drone: { name: 'Змеёныш', r: 10, hp: 7, speed: 76, dmg: 4, xp: 1.5, kb: 0, move: 'chase', fly: true },
+  washer: { name: 'Чародей', r: 20, hp: 50, speed: 35, dmg: 7, xp: 2.5, kb: 0.3, move: 'chase' },
+  steamer: { name: 'Костяной конь', r: 24, hp: 105, speed: 32, dmg: 7, xp: 2.5, kb: 0.3, move: 'charge' }, // a chaser corners the cat in the hall
+  roller: { name: 'Чудо-юдо', r: 16, hp: 189, speed: 53, dmg: 7, xp: 2.5, kb: 0.1, move: 'charge' },
+  cyclone: { name: 'Чёрный латник', r: 20, hp: 125, speed: 50, dmg: 10, xp: 2, kb: 0.8, move: 'chase' },
+  tank: { name: 'Идолище поганое', r: 30, hp: 350, speed: 30, dmg: 14, xp: 3, kb: 0, move: 'chase' },
+  industrial: { name: 'Лихо Одноглазое', r: 34, hp: 150, speed: 61, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
+  king: { name: 'Змей Горыныч', r: 44, hp: 700, speed: 30, dmg: 14, xp: 0, kb: 0, move: 'chase' }, // hp per cat level
 
   // The flower wall of Mad Forest: a ring that closes in on the cat. Health
   // per cat level; it barely hurts, it hems the cat in. It gives no gems and
   // goes away when its time is up.
-  wall: { name: 'Стена пыли', r: 16, hp: 21, speed: 8, dmg: 1, xp: 0, kb: 1, move: 'chase', fly: true },
+  wall: { name: 'Чертополох', r: 16, hp: 21, speed: 8, dmg: 1, xp: 0, kb: 1, move: 'chase', fly: true },
   // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
-  cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 200, dmg: 99999, xp: 0, kb: 0, move: 'chase' },
+  cleaner: { name: 'Кощей Бессмертный', r: 24, hp: 1, speed: 200, dmg: 99999, xp: 0, kb: 0, move: 'chase' },
 };
 
 export type RoomId = 'flat' | 'yard' | 'warehouse';
@@ -191,7 +192,7 @@ export interface RoomDef {
 
 export const ROOMS: Record<RoomId, RoomDef> = {
   flat: {
-    name: 'Квартира',
+    name: 'Дремучий лес',
     shape: 'open',
     crowd: 1,
     waves: madForest({ bat: 'mouse', redbat: 'redmouse', zombie: 'dust', skeleton: 'mite', ghost: 'moth', mud: 'robot', greenmud: 'wetbot', bigbat: 'rat', wolf: 'brush', mummy: 'bigvac' }),
@@ -206,7 +207,7 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     after: null,
   },
   yard: {
-    name: 'Двор',
+    name: 'Муромская дорога',
     shape: 'strip',
     crowd: 0.6,
     waves: madForest({ bat: 'pigeon', redbat: 'crow', zombie: 'trimmer', skeleton: 'goose', ghost: 'wasp', mud: 'mower', greenmud: 'tractor', bigbat: 'dog', wolf: 'hound', mummy: 'combine' }),
@@ -221,7 +222,7 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     after: 'flat',
   },
   warehouse: {
-    name: 'Склад пылесосов',
+    name: 'Кощеево царство',
     shape: 'hall',
     crowd: 1,
     waves: madForest({ bat: 'minibot', redbat: 'redbot', zombie: 'hose', skeleton: 'scrubber', ghost: 'drone', mud: 'washer', greenmud: 'steamer', bigbat: 'roller', wolf: 'cyclone', mummy: 'tank' }),
@@ -324,58 +325,58 @@ function weapon(name: string, first: string, base: WeaponStats, levels: Partial<
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   // Whip: a slash to the side the cat faces, later behind it too.
   claws: weapon(
-    'Когти',
-    'Удар когтями в сторону, куда смотрит кот',
+    'Меч',
+    'Удар мечом в сторону, куда смотрит герой',
     { dmg: 10, cd: 1.35, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ amount: 1 }, { dmg: 5 }, { dmg: 5, area: 0.1 }, { dmg: 5 }, { dmg: 5, area: 0.1 }, { dmg: 5 }, { dmg: 5 }],
   ),
   // Magic wand: shots at the nearest enemy.
   laser: weapon(
-    'Лазерная указка',
-    'Точка летит в ближайшего врага',
+    'Жар-перо',
+    'Огненное перо летит в ближайшего врага',
     { dmg: 10, cd: 1.2, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ amount: 1 }, { cd: -0.2 }, { amount: 1 }, { dmg: 10 }, { amount: 1 }, { pierce: 1 }, { dmg: 10 }],
   ),
   // Knife: fast fish in the direction the cat moves.
   fish: weapon(
-    'Метательная рыбка',
-    'Быстрые рыбки летят туда, куда бежит кот',
+    'Лук со стрелами',
+    'Быстрые стрелы летят туда, куда бежит герой',
     { dmg: 7, cd: 1, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ amount: 1 }, { amount: 1, dmg: 5 }, { amount: 1 }, { pierce: 1 }, { amount: 1 }, { amount: 1, dmg: 5 }, { pierce: 1 }],
   ),
   // King Bible: yarn balls circle the cat for a while.
   yarn: weapon(
-    'Клубок',
-    'Клубки кружат вокруг кота',
+    'Обереги',
+    'Обереги кружат вокруг героя',
     { dmg: 10, cd: 3, amount: 1, area: 1, speed: 1, duration: 3, pierce: 0 },
     [{ amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }, { speed: 0.3, area: 0.25 }, { duration: 0.5, dmg: 10 }, { amount: 1 }],
   ),
   // Garlic: an aura that hurts enemies around the cat.
   meow: weapon(
-    'Мяу',
-    'Мурчащая аура ранит всех, кто подошёл к коту',
+    'Гусли',
+    'Звон гуслей ранит всех, кто подошёл к герою',
     { dmg: 5, cd: 1.3, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ area: 0.4, dmg: 2 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 2 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 2 }],
   ),
   // Santa water: puddles that hurt whoever stands in them.
   glass: weapon(
-    'Опрокинутый стакан',
-    'Лужа на полу ранит всех, кто в ней',
+    'Живая вода',
+    'Лужа на земле ранит всех нечистых, кто в ней',
     { dmg: 10, cd: 4.5, amount: 1, area: 1, speed: 1, duration: 2, pierce: 0 },
     [{ amount: 1, area: 0.2 }, { dmg: 10, duration: 0.5 }, { amount: 1, area: 0.2 }, { dmg: 10, duration: 0.25 }, { amount: 1, area: 0.2 }, { dmg: 5, duration: 0.25 }, { dmg: 5, area: 0.2 }],
   ),
   // Axe: pots fly up and fall in an arc, through several enemies (3 at
   // first, as the VS pierce 3: it passes through 2).
   pot: weapon(
-    'Цветочный горшок',
-    'Горшки летят вверх и падают по дуге',
+    'Топор',
+    'Топоры летят вверх и падают по дуге',
     { dmg: 20, cd: 4, amount: 1, area: 1, speed: 1, duration: 0, pierce: 2 },
     [{ amount: 1 }, { dmg: 20 }, { pierce: 2 }, { amount: 1 }, { dmg: 20 }, { pierce: 2 }, { dmg: 20 }],
   ),
   // Lightning ring: sparks strike random enemies on screen.
   spark: weapon(
-    'Статическая шерсть',
-    'Искры бьют случайных врагов на экране',
+    'Молния',
+    'Молнии бьют случайных врагов на экране',
     { dmg: 15, cd: 4.5, amount: 2, area: 1, speed: 1, duration: 0, pierce: 0 },
     [{ amount: 1 }, { area: 1, dmg: 10 }, { amount: 1 }, { area: 1, dmg: 20 }, { amount: 1 }, { area: 1, dmg: 20 }, { amount: 1 }],
   ),
@@ -389,16 +390,16 @@ export interface PassiveDef {
 }
 
 export const PASSIVES: Record<PassiveId, PassiveDef> = {
-  belly: { name: 'Сытый живот', max: 5, per: { maxHp: 0.2 }, desc: 'Здоровье +20%' },
-  box: { name: 'Пустая коробка', max: 5, per: { cooldown: -0.08 }, desc: 'Перезарядка −8%' },
-  paws: { name: 'Ловкие лапы', max: 5, per: { speed: 0.1 }, desc: 'Скорость снарядов +10%' },
-  patience: { name: 'Долгое мурчание', max: 5, per: { duration: 0.1 }, desc: 'Атаки длятся дольше на 10%' },
-  purr: { name: 'Мурчалка', max: 5, per: { recovery: 0.2 }, desc: '+0,2 здоровья в секунду' },
-  catnip: { name: 'Мята в кармане', max: 5, per: {}, desc: 'Радиус сбора кристаллов: +50%, а на 5-м уровне ×4' }, // as Attractorb, in CatRun.recompute
-  bigpaws: { name: 'Большие лапы', max: 5, per: { area: 0.1 }, desc: 'Область атак +10%' },
-  pack: { name: 'Кошачья стая', max: 2, per: { amount: 1 }, desc: '+1 снаряд ко всему оружию' },
-  food: { name: 'Премиальный корм', max: 5, per: { might: 0.1 }, desc: 'Урон +10%' },
-  blackcat: { name: 'Чёрная кошка', max: 5, per: { luck: 0.1 }, desc: 'Удача +10%: чаще 4-я карточка' },
+  belly: { name: 'Каравай', max: 5, per: { maxHp: 0.2 }, desc: 'Здоровье +20%' },
+  box: { name: 'Чародейская книга', max: 5, per: { cooldown: -0.08 }, desc: 'Перезарядка −8%' },
+  paws: { name: 'Наручи', max: 5, per: { speed: 0.1 }, desc: 'Скорость снарядов +10%' },
+  patience: { name: 'Веретено', max: 5, per: { duration: 0.1 }, desc: 'Атаки длятся дольше на 10%' },
+  purr: { name: 'Молодильное яблоко', max: 5, per: { recovery: 0.2 }, desc: '+0,2 здоровья в секунду' },
+  catnip: { name: 'Магнит', max: 5, per: {}, desc: 'Радиус сбора самоцветов: +50%, а на 5-м уровне ×4' }, // as Attractorb, in CatRun.recompute
+  bigpaws: { name: 'Богатырский размах', max: 5, per: { area: 0.1 }, desc: 'Область атак +10%' },
+  pack: { name: 'Зеркальце', max: 2, per: { amount: 1 }, desc: '+1 снаряд ко всему оружию' },
+  food: { name: 'Каша', max: 5, per: { might: 0.1 }, desc: 'Урон +10%' },
+  blackcat: { name: 'Подкова', max: 5, per: { luck: 0.1 }, desc: 'Удача +10%: чаще 4-я карточка' },
 };
 
 // How often a card comes up, the rarity of its VS item: King Bible and
@@ -434,14 +435,14 @@ export interface EvolutionDef {
 }
 
 export const EVOLUTIONS: Record<WeaponId, EvolutionDef> = {
-  claws: { name: 'Когти тигра', passive: 'belly', desc: 'Бьют в обе стороны, шире, и каждый удар лечит кота' },
-  laser: { name: 'Лазерное шоу', passive: 'box', desc: 'Стреляет без паузы' },
-  fish: { name: 'Рыбный дождь', passive: 'paws', desc: 'Непрерывный поток рыбок' },
-  yarn: { name: 'Вечный клубок', passive: 'patience', desc: 'Клубки кружат не переставая' },
-  meow: { name: 'Оглушительное МЯУ', passive: 'purr', desc: 'Аура больше и лечит за каждого задетого' },
-  glass: { name: 'Потоп', passive: 'catnip', desc: 'Лужи растут и ползут за котом' },
-  pot: { name: 'Кактусопад', passive: 'bigpaws', desc: 'Горшки разлетаются спиралью и пробивают всех' },
-  spark: { name: 'Грозовой кот', passive: 'pack', desc: 'Каждая искра бьёт дважды' },
+  claws: { name: 'Меч-кладенец', passive: 'belly', desc: 'Рубит в обе стороны, шире, и каждый удар лечит героя' },
+  laser: { name: 'Жар-птица', passive: 'box', desc: 'Стреляет без паузы' },
+  fish: { name: 'Град стрел', passive: 'paws', desc: 'Непрерывный поток стрел' },
+  yarn: { name: 'Вечные обереги', passive: 'patience', desc: 'Обереги кружат не переставая' },
+  meow: { name: 'Гусли-самогуды', passive: 'purr', desc: 'Аура больше и лечит за каждого задетого' },
+  glass: { name: 'Окиян-море', passive: 'catnip', desc: 'Лужи растут и ползут за героем' },
+  pot: { name: 'Топор-саморуб', passive: 'bigpaws', desc: 'Топоры разлетаются спиралью и пробивают всех' },
+  spark: { name: 'Грозовая туча', passive: 'pack', desc: 'Каждая молния бьёт дважды' },
 };
 
 export const WEAPON_IDS = Object.keys(WEAPONS) as WeaponId[];
@@ -451,8 +452,8 @@ export const isPassive = (id: CardId): id is PassiveId => id in PASSIVES;
 export const itemMax = (id: ItemId): number => (isWeapon(id) ? WEAPON_MAX : PASSIVES[id].max);
 
 export const EXTRAS: Record<ExtraId, { name: string; desc: string }> = {
-  snack: { name: 'Перекус', desc: 'Вылечить 30 здоровья' },
-  fishes: { name: 'Горсть рыбок', desc: '+10 рыбок' },
+  snack: { name: 'Кружка кваса', desc: 'Вылечить 30 здоровья' },
+  fishes: { name: 'Кошель злата', desc: '+10 злата' },
 };
 
 export function cardName(id: CardId): string {
@@ -490,32 +491,32 @@ export interface HeroDef {
 
 export const HEROES = {
   ryzhik: {
-    name: 'Рыжик',
-    title: 'дворовый боец',
+    name: 'Илья Муромец',
+    title: 'старший богатырь',
     weapon: 'claws',
     stats: { maxHp: 120, armor: 1 },
     bonus: '+1 броня каждые 10 уровней, до +5',
     unlock: null,
   },
   murka: {
-    name: 'Мурка',
-    title: 'сиамская умница',
+    name: 'Василиса Премудрая',
+    title: 'чародейка',
     weapon: 'laser',
     stats: {},
     bonus: '+10% опыта, +20% с 10 уровня, +30% с 20-го',
     unlock: { fish: 300 },
   },
   barsik: {
-    name: 'Барсик',
-    title: 'пухлый мейн-кун',
+    name: 'Добрыня Никитич',
+    title: 'могучий змееборец',
     weapon: 'yarn',
     stats: { maxHp: 160, move: 136 * 0.85 },
     bonus: '+10% области атак, +20% с 10 уровня, +30% с 20-го',
     unlock: { surviveMin: 10 },
   },
   snezhok: {
-    name: 'Снежок',
-    title: 'шустрый сфинкс',
+    name: 'Алёша Попович',
+    title: 'ловкий стрелок',
     weapon: 'fish',
     stats: { maxHp: 80, move: 136 * 1.25 },
     bonus: '+1 снаряд ко всему оружию с 20 уровня',
@@ -530,7 +531,7 @@ export const isHero = (id: unknown): id is HeroId => typeof id === 'string' && O
 export function unlockText(id: HeroId): string {
   const u: HeroDef['unlock'] = HEROES[id].unlock;
   if (!u) return 'открыт сразу';
-  if ('fish' in u) return `${u.fish} рыбок`;
+  if ('fish' in u) return `${u.fish} злата`;
   if ('surviveMin' in u) return `продержаться ${u.surviveMin} минут`;
   return `победить ${u.kills} врагов за все забеги`;
 }
@@ -549,15 +550,15 @@ export const POWERS = {
   armor: { name: 'Броня', desc: '−1 к полученному урону', max: 3, base: 60 },
   maxHp: { name: 'Здоровье', desc: '+10% здоровья', max: 3, base: 30 },
   recovery: { name: 'Регенерация', desc: '+0,1 здоровья в секунду', max: 5, base: 40 },
-  move: { name: 'Скорость', desc: '+5% скорости кота', max: 2, base: 50 },
+  move: { name: 'Скорость', desc: '+5% скорости героя', max: 2, base: 50 },
   area: { name: 'Область', desc: '+5% области атак', max: 2, base: 60 },
   cooldown: { name: 'Перезарядка', desc: '−2,5% перезарядки', max: 2, base: 90 },
   magnet: { name: 'Магнит', desc: '+25% радиуса сбора', max: 2, base: 30 },
   luck: { name: 'Удача', desc: '+10% удачи', max: 3, base: 60 },
   growth: { name: 'Рост', desc: '+3% опыта', max: 5, base: 90 },
-  greed: { name: 'Жадность', desc: '+10% рыбок за забег', max: 5, base: 30 },
+  greed: { name: 'Жадность', desc: '+10% злата за забег', max: 5, base: 30 },
   reroll: { name: 'Реролл', desc: '+1 реролл за забег', max: 3, base: 100 },
-  revive: { name: 'Девятая жизнь', desc: 'одно воскрешение с половиной здоровья', max: 1, base: 500 },
+  revive: { name: 'Второе дыхание', desc: 'одно воскрешение с половиной здоровья', max: 1, base: 500 },
 } satisfies Record<string, PowerDef>;
 export type PowerId = keyof typeof POWERS;
 export const POWER_IDS = Object.keys(POWERS) as PowerId[];

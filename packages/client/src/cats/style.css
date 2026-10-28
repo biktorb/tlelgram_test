@@ -320,3 +320,7 @@ html, body {
 .dmg.frame, .evos.frame { padding: 8px 10px; box-sizing: border-box; }
 .dmg .head { color: var(--gold); }
 .dmg span { color: #fff; }
+
+/* The tale: frames before a location and the epilogue after a win. */
+.tale { font-size: 17px; line-height: 1.45; max-width: 420px; margin: 8px auto 14px; text-align: center; }
+.tale-link { color: #e6c24a; text-decoration: underline; cursor: pointer; margin-top: 2px; }

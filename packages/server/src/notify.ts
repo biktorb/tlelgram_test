@@ -3,8 +3,8 @@ import type { Duel } from './store.ts';
 
 const text = (friend: string, beat: boolean) =>
   beat
-    ? `${friend} принял ваш вызов в «Котах против пылесосов» и продержался лучше вас. Сыграйте ещё раз и отправьте новый вызов!`
-    : `${friend} принял ваш вызов в «Котах против пылесосов», но ваш кот продержался лучше 💪`;
+    ? `${friend} принял ваш вызов в «Богатырях против нечисти» и продержался лучше вас. Сыграйте ещё раз и отправьте новый вызов!`
+    : `${friend} принял ваш вызов в «Богатырях против нечисти», но ваш герой продержался лучше 💪`;
 
 // Sends the challenger a private message from the bot. Telegram refuses it when
 // the player never opened a chat with the bot; the in-game inbox covers that case.
