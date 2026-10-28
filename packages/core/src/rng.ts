@@ -32,6 +32,19 @@ export class Rng {
     }
     return out;
   }
+
+  // Picks up to `count` distinct items, each as likely as its weight.
+  weighted<T>(items: readonly T[], count: number, weight: (item: T) => number): T[] {
+    const pool = items.slice();
+    const out: T[] = [];
+    while (out.length < count && pool.length > 0) {
+      let r = this.next() * pool.reduce((sum, it) => sum + weight(it), 0);
+      let i = 0;
+      while (i < pool.length - 1 && (r -= weight(pool[i])) >= 0) i++;
+      out.push(pool.splice(i, 1)[0]);
+    }
+    return out;
+  }
 }
 
 export function hashSeed(text: string): number {

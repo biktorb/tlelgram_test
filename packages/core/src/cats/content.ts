@@ -63,7 +63,7 @@ export interface EnemyDef {
 // Every room has the cast of Mad Forest in its own skin, with the numbers of
 // the VS wiki: health and damage at 70%, speed at 65% (our map is smaller).
 // Bat 1 hp → mouse, red-eyed bat 5 → angry mouse, zombie 10, skeleton 15,
-// ghost 10 (fast), gray mudman 70, green mudman 150, giant bat 50,
+// ghost 10 (fast), gray mudman 70, green mudman 150, giant bat 270,
 // werewolf 180, giant mummy 500. Damage 5 → 4, 10 → 7, 14 → 10, 20 → 14.
 export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   mouse: { name: 'Мышь', r: 10, hp: 1, speed: 90, dmg: 4, xp: 1, move: 'chase' },
@@ -73,11 +73,11 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   moth: { name: 'Моль', r: 11, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
   robot: { name: 'Робот-пылесос', r: 18, hp: 50, speed: 70, dmg: 7, xp: 2.5, move: 'charge' },
   wetbot: { name: 'Мокрый робот', r: 20, hp: 105, speed: 65, dmg: 7, xp: 2.5, move: 'charge' },
-  rat: { name: 'Крыса', r: 16, hp: 35, speed: 90, dmg: 7, xp: 2, move: 'chase' },
+  rat: { name: 'Крыса', r: 16, hp: 189, speed: 90, dmg: 7, xp: 2.5, move: 'chase' },
   brush: { name: 'Турбощётка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
   bigvac: { name: 'Пылесос-гигант', r: 28, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 75, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  mop: { name: 'Швабра', r: 38, hp: 250, speed: 95, dmg: 30, xp: 0, move: 'chase' }, // hp per cat level
+  bigrobot: { name: 'Большой робот', r: 30, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
+  mop: { name: 'Швабра', r: 38, hp: 250, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
 
   pigeon: { name: 'Голубь', r: 11, hp: 1, speed: 110, dmg: 4, xp: 1, move: 'flock', fly: true },
   crow: { name: 'Ворона', r: 12, hp: 4, speed: 90, dmg: 4, xp: 1, move: 'chase' },
@@ -86,11 +86,11 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   wasp: { name: 'Оса', r: 9, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
   mower: { name: 'Газонокосилка', r: 22, hp: 50, speed: 60, dmg: 7, xp: 2.5, move: 'chase' },
   tractor: { name: 'Мини-трактор', r: 26, hp: 105, speed: 55, dmg: 7, xp: 2.5, move: 'charge' },
-  dog: { name: 'Пёс', r: 16, hp: 35, speed: 80, dmg: 7, xp: 2, move: 'dash' }, // lunges, so a little slower
+  dog: { name: 'Пёс', r: 16, hp: 189, speed: 80, dmg: 7, xp: 2.5, move: 'dash' }, // lunges, so a little slower
   hound: { name: 'Овчарка', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'dash' },
   combine: { name: 'Садовый комбайн', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 80, dmg: 14, xp: 0, move: 'dash' }, // hp per cat level
-  blower: { name: 'Листодув', r: 40, hp: 400, speed: 80, dmg: 35, xp: 0, move: 'chase' }, // hp per cat level
+  bulldog: { name: 'Бульдог', r: 30, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'dash' }, // hp per cat level
+  blower: { name: 'Листодув', r: 40, hp: 400, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
 
   minibot: { name: 'Мини-робот', r: 8, hp: 1, speed: 95, dmg: 4, xp: 1, move: 'chase' },
   redbot: { name: 'Злой мини-робот', r: 9, hp: 4, speed: 95, dmg: 4, xp: 1, move: 'chase' },
@@ -99,15 +99,16 @@ export const ENEMIES: Record<EnemyKind, EnemyDef> = {
   drone: { name: 'Дрон', r: 10, hp: 7, speed: 130, dmg: 4, xp: 1.5, move: 'chase', fly: true },
   washer: { name: 'Моющий пылесос', r: 20, hp: 50, speed: 60, dmg: 7, xp: 2.5, move: 'chase' },
   steamer: { name: 'Пароочиститель', r: 24, hp: 105, speed: 55, dmg: 7, xp: 2.5, move: 'charge' }, // a chaser corners the cat in the hall
-  roller: { name: 'Робот-полотёр', r: 16, hp: 35, speed: 90, dmg: 7, xp: 2, move: 'charge' },
+  roller: { name: 'Робот-полотёр', r: 16, hp: 189, speed: 90, dmg: 7, xp: 2.5, move: 'charge' },
   cyclone: { name: 'Циклонный пылесос', r: 20, hp: 125, speed: 85, dmg: 10, xp: 2, move: 'chase' },
   tank: { name: 'Пылесос-бак', r: 30, hp: 350, speed: 52, dmg: 14, xp: 3, move: 'chase' },
-  industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 60, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
-  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 70, dmg: 40, xp: 0, move: 'chase' }, // hp per cat level
+  industrial: { name: 'Промышленный пылесос', r: 34, hp: 150, speed: 104, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
+  king: { name: 'Король пылесосов', r: 44, hp: 700, speed: 52, dmg: 14, xp: 0, move: 'chase' }, // hp per cat level
 
   // The flower wall of Mad Forest: a ring that closes in on the cat. Health
-  // per cat level; it gives no gems and goes away when its time is up.
-  wall: { name: 'Стена пыли', r: 16, hp: 5, speed: 22, dmg: 7, xp: 0, move: 'chase', fly: true },
+  // per cat level; it barely hurts, it hems the cat in. It gives no gems and
+  // goes away when its time is up.
+  wall: { name: 'Стена пыли', r: 16, hp: 21, speed: 22, dmg: 1, xp: 0, move: 'chase', fly: true },
   // The Reaper: comes at 20:00, cannot be hurt and kills with one touch.
   cleaner: { name: 'Уборщица', r: 24, hp: 1, speed: 230, dmg: 99999, xp: 0, move: 'chase' },
 };
@@ -126,30 +127,31 @@ export interface Wave {
   // (`chance`). `ghost` sends the room's fast kind instead of the small one.
   swarm?: { at: number; chance: number; count: number; gap: number; ghost?: boolean };
   wall?: number; // seconds the closing wall stays
+  wallChance?: number; // if not always
 }
 
 // The parts of the Mad Forest cast; each room fills them with its own kinds.
 type Part = 'bat' | 'redbat' | 'zombie' | 'skeleton' | 'ghost' | 'mud' | 'greenmud' | 'bigbat' | 'wolf' | 'mummy';
 
-// Mad Forest, minutes 0–19 (from the VS wiki), for our 20-minute room: the
-// last minute is the wiki's 20:00, with its big swarm.
-const MAD_FOREST: { kinds: Part[]; min: number; every: number; swarm?: Wave['swarm']; wall?: number }[] = [
+// Mad Forest, minutes 0–19 (from the game's own STAGE_DATA, v1.16), for our
+// 20-minute room: the last minute is its 20:00, with its big swarm.
+const MAD_FOREST: { kinds: Part[]; min: number; every: number; swarm?: Wave['swarm']; wall?: number; wallChance?: number }[] = [
   { kinds: ['redbat'], min: 15, every: 1 },
-  { kinds: ['zombie'], min: 30, every: 1 },
+  { kinds: ['zombie', 'bat'], min: 30, every: 1 },
   { kinds: ['bat', 'redbat', 'redbat'], min: 50, every: 0.5, swarm: { at: 5, chance: 1, count: 3, gap: 5 } },
   { kinds: ['skeleton'], min: 40, every: 0.25, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
-  { kinds: ['skeleton'], min: 30, every: 1, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
+  { kinds: ['skeleton', 'ghost'], min: 30, every: 0.5, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
   { kinds: ['greenmud'], min: 10, every: 1, wall: 30 },
   { kinds: ['zombie', 'greenmud'], min: 20, every: 0.5, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
   { kinds: ['bat', 'redbat', 'redbat', 'mud'], min: 80, every: 0.5, swarm: { at: 5, chance: 0.8, count: 6, gap: 5 } },
   { kinds: ['zombie'], min: 100, every: 1.5, swarm: { at: 15, chance: 0.8, count: 3, gap: 15 } },
-  { kinds: ['bigbat'], min: 30, every: 0.5, swarm: { at: 15, chance: 0.7, count: 3, gap: 15 } },
+  { kinds: ['bigbat', 'zombie'], min: 30, every: 0.5, swarm: { at: 15, chance: 0.7, count: 3, gap: 15 } },
   { kinds: ['mud', 'greenmud'], min: 10, every: 0.5, wall: 60 },
   { kinds: ['skeleton'], min: 300, every: 0.1, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
-  { kinds: ['wolf'], min: 20, every: 0.25, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
+  { kinds: ['wolf', 'ghost', 'skeleton'], min: 20, every: 0.25, swarm: { at: 5, chance: 0.1, count: 2, gap: 5 } },
   { kinds: ['wolf', 'ghost', 'ghost'], min: 150, every: 0.5, swarm: { at: 1, chance: 0.7, count: 20, gap: 1.2, ghost: true } },
-  { kinds: ['bigbat'], min: 20, every: 0.1 },
-  { kinds: ['wolf', 'bigbat', 'greenmud'], min: 100, every: 0.1, wall: 60 },
+  { kinds: ['bigbat', 'wolf'], min: 20, every: 0.1 },
+  { kinds: ['wolf', 'bigbat', 'greenmud'], min: 100, every: 0.1, wall: 60, wallChance: 0.8 },
   { kinds: ['mummy', 'mud', 'greenmud'], min: 100, every: 0.1 },
   { kinds: ['mummy'], min: 20, every: 1 },
   { kinds: ['mummy', 'mud'], min: 60, every: 0.5 },
@@ -169,7 +171,12 @@ export interface RoomDef {
   crowd: number; // times the minute's least and its rate: the strip between fences fills up faster
   swarm: EnemyKind; // what flies in swarms
   ghost: EnemyKind; // the fast swarm
-  elite: EnemyKind; // at 5, 10 and 15 minutes, with a chest
+  // With a chest, as in Mad Forest: at 5:00 a big one of the room (500 health
+  // in VS, not per level), at 10:00 the elite, at 15:00 a giant of the
+  // room's strongest kind (the werewolf boss: 200 per level).
+  brute: EnemyKind;
+  elite: EnemyKind;
+  beast: EnemyKind;
   miniElite: EnemyKind; // a giant one of these in between, also with a chest
   boss: EnemyKind; // at 18 minutes
   minion: EnemyKind; // what the boss calls in
@@ -185,7 +192,9 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     waves: madForest({ bat: 'mouse', redbat: 'redmouse', zombie: 'dust', skeleton: 'mite', ghost: 'moth', mud: 'robot', greenmud: 'wetbot', bigbat: 'rat', wolf: 'brush', mummy: 'bigvac' }),
     swarm: 'mouse',
     ghost: 'moth',
+    brute: 'bigvac',
     elite: 'bigrobot',
+    beast: 'brush',
     miniElite: 'rat',
     boss: 'mop',
     minion: 'dust',
@@ -198,7 +207,9 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     waves: madForest({ bat: 'pigeon', redbat: 'crow', zombie: 'trimmer', skeleton: 'goose', ghost: 'wasp', mud: 'mower', greenmud: 'tractor', bigbat: 'dog', wolf: 'hound', mummy: 'combine' }),
     swarm: 'pigeon',
     ghost: 'wasp',
+    brute: 'combine',
     elite: 'bulldog',
+    beast: 'hound',
     miniElite: 'goose', // not the dog: a giant lunging dog at 1:00 is unfair
     boss: 'blower',
     minion: 'pigeon',
@@ -211,7 +222,9 @@ export const ROOMS: Record<RoomId, RoomDef> = {
     waves: madForest({ bat: 'minibot', redbat: 'redbot', zombie: 'hose', skeleton: 'scrubber', ghost: 'drone', mud: 'washer', greenmud: 'steamer', bigbat: 'roller', wolf: 'cyclone', mummy: 'tank' }),
     swarm: 'minibot',
     ghost: 'drone',
+    brute: 'tank',
     elite: 'industrial',
+    beast: 'cyclone',
     miniElite: 'roller',
     boss: 'king',
     minion: 'minibot',
@@ -337,14 +350,14 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     'Мяу',
     'Мурчащая аура ранит всех, кто подошёл к коту',
     { dmg: 5, cd: 1.3, amount: 1, area: 1, speed: 1, duration: 0, pierce: 0 },
-    [{ area: 0.4, dmg: 2 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 2 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }],
+    [{ area: 0.4, dmg: 2 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 2 }, { area: 0.2, dmg: 1 }, { cd: -0.1, dmg: 1 }, { area: 0.2, dmg: 2 }],
   ),
   // Santa water: puddles that hurt whoever stands in them.
   glass: weapon(
     'Опрокинутый стакан',
     'Лужа на полу ранит всех, кто в ней',
     { dmg: 10, cd: 4.5, amount: 1, area: 1, speed: 1, duration: 2, pierce: 0 },
-    [{ amount: 1, area: 0.2 }, { dmg: 10, duration: 0.5 }, { amount: 1, area: 0.2 }, { dmg: 10, duration: 0.3 }, { amount: 1, area: 0.2 }, { dmg: 5, duration: 0.3 }, { dmg: 5, area: 0.2 }],
+    [{ amount: 1, area: 0.2 }, { dmg: 10, duration: 0.5 }, { amount: 1, area: 0.2 }, { dmg: 10, duration: 0.25 }, { amount: 1, area: 0.2 }, { dmg: 5, duration: 0.25 }, { dmg: 5, area: 0.2 }],
   ),
   // Axe: pots fly up and fall in an arc, through several enemies (3 at
   // first, as the VS pierce 3: it passes through 2).
@@ -381,6 +394,30 @@ export const PASSIVES: Record<PassiveId, PassiveDef> = {
   pack: { name: 'Кошачья стая', max: 2, per: { amount: 1 }, desc: '+1 снаряд ко всему оружию' },
   food: { name: 'Премиальный корм', max: 5, per: { might: 0.1 }, desc: 'Урон +10%' },
   blackcat: { name: 'Чёрная кошка', max: 5, per: { luck: 0.1 }, desc: 'Удача +10%: чаще 4-я карточка' },
+};
+
+// How often a card comes up, the rarity of its VS item: King Bible and
+// Lightning Ring 80, Garlic 70, Hollow Heart and Pummarola 90, Empty Tome and
+// Duplicator 50, the rest 100.
+export const RARITY: Record<ItemId, number> = {
+  claws: 100,
+  laser: 100,
+  fish: 100,
+  yarn: 80,
+  meow: 70,
+  glass: 100,
+  pot: 100,
+  spark: 80,
+  belly: 90,
+  box: 50,
+  paws: 100,
+  patience: 100,
+  purr: 90,
+  catnip: 100,
+  bigpaws: 100,
+  pack: 50,
+  food: 100,
+  blackcat: 100,
 };
 
 // A weapon at level 8 plus its passive becomes its evolution from the next
