@@ -36,8 +36,9 @@ import { dcos, dsin, len } from './math.ts';
 // stay true. 1: before PR #32, 2: VS weapons (#32), 3: VS enemies (#33),
 // 4: floor things from breakables, evolutions from 10:00, boss per level,
 // 5: numbers from the game's own data (waves, elites, XP, the wall, cards),
-// 6: numbers from the game's code (speeds, view, spawning, knockback, magnet).
-export const SIM_VERSION = 6;
+// 6: numbers from the game's code (speeds, view, spawning, knockback, magnet),
+// 7: evolutions from 7:00.
+export const SIM_VERSION = 7;
 export const TICK_RATE = 30;
 export const DT = 1 / TICK_RATE;
 export const RUN_SECONDS = 20 * 60;
@@ -49,9 +50,9 @@ export const END_TICKS = RUN_TICKS + 10 * MINUTE_TICKS;
 const MINUTE = 60 * TICK_RATE;
 export const BOSS_TICK = 18 * MINUTE;
 export const ELITE_TICKS = [5 * MINUTE, 10 * MINUTE, 15 * MINUTE];
-// As in VS, only a chest from an enemy that came at 10:00 or later can
-// evolve a weapon; earlier chests only level items up.
-export const EVOLVE_TICK = 10 * MINUTE;
+// Only a chest from an enemy that came at 7:00 or later can evolve a weapon
+// (VS: 10:00; the owner wants them sooner); earlier chests only level items up.
+export const EVOLVE_TICK = 7 * MINUTE;
 // Smaller elites in between, like the minute bosses of Mad Forest: a giant
 // dust bunny with a chest.
 export const MINI_ELITE_TICKS = [1, 3, 7, 9, 12, 14, 16, 18].map((m) => m * MINUTE);

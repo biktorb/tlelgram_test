@@ -522,7 +522,7 @@ function collectionScreen(): void {
   }
   for (const w of cats.WEAPON_IDS) {
     const evo = cats.EVOLUTIONS[w];
-    entries.push({ key: `evo:${w}`, icon: () => icon(w, 30), name: `★ ${evo.name}`, text: evo.desc, hint: `Нужно: ${cats.WEAPONS[w].name} ур. ${cats.WEAPON_MAX} + ${cats.PASSIVES[evo.passive].name}, сундук после 10:00` });
+    entries.push({ key: `evo:${w}`, icon: () => icon(w, 30), name: `★ ${evo.name}`, text: evo.desc, hint: `Нужно: ${cats.WEAPONS[w].name} ур. ${cats.WEAPON_MAX} + ${cats.PASSIVES[evo.passive].name}, сундук после ${Math.floor(cats.EVOLVE_TICK / cats.TICK_RATE / 60)}:00` });
   }
   for (const id of cats.PASSIVE_IDS) {
     const def = cats.PASSIVES[id];
